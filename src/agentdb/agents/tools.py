@@ -161,4 +161,4 @@ class CityTools:
         for logging context only.
         """
         self.overlay.discard()
-        return "Rolled back all staged changes"
+        return f"Rolled back all staged changes (context: {service})"
