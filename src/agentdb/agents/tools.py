@@ -15,11 +15,22 @@ class CityTools:
     All path-based operations validate that paths are under /city/.
     """
 
-    def __init__(self, fs: VirtualFS, kv: KVStore, overlay: OverlayFS):
+    def __init__(
+        self,
+        fs: VirtualFS,
+        kv: KVStore,
+        overlay: OverlayFS,
+        event_buffer: list | None = None,
+    ):
         self.fs = fs
         self.kv = kv
         self.overlay = overlay
         self._incident_counter = 0
+        self._events = event_buffer if event_buffer is not None else []
+
+    def _emit(self, event_type: str, **kwargs) -> None:
+        """Append an event to the event buffer."""
+        self._events.append({"type": event_type, **kwargs})
 
     def _validate_path(self, path: str) -> str | None:
         """Return error string if path is invalid, None if OK."""
@@ -55,7 +66,9 @@ class CityTools:
             "status": "assigned",
             "created_at": int(time.time()),
         })
-        self.fs.write_file(f"/city/plans/{task_id}.json", task_data)
+        task_path = f"/city/plans/{task_id}.json"
+        self.fs.write_file(task_path, task_data)
+        self._emit("fs_change", path=task_path, action="write", size=len(task_data))
         return f"Assigned {task_id} to {assigned_to}: {description}"
 
     # --- Engineer tools ---
@@ -64,7 +77,10 @@ class CityTools:
         """Write a file to the city filesystem (production)."""
         if err := self._validate_path(path):
             return err
+        old_content = self.fs.read_file(path)
         self.fs.write_file(path, content)
+        self._emit("code_diff", path=path, old_content=old_content, new_content=content, action="write")
+        self._emit("fs_change", path=path, action="write", size=len(content))
         return f"Written {len(content)} bytes to {path}"
 
     def read_file(self, path: str) -> str:
@@ -80,7 +96,10 @@ class CityTools:
         """Write a file to the staging overlay."""
         if err := self._validate_path(path):
             return err
+        old_content = self.fs.read_file(path)
         self.overlay.write_file(path, content)
+        self._emit("code_diff", path=path, old_content=old_content, new_content=content, action="stage")
+        self._emit("fs_change", path=path, action="stage", size=len(content))
         return f"Staged {len(content)} bytes to {path}"
 
     def run_tests(self, service: str) -> str:
@@ -130,7 +149,9 @@ class CityTools:
             "status": "open",
             "created_at": int(time.time()),
         })
-        self.fs.write_file(f"/city/incidents/{inc_id}.json", incident)
+        path = f"/city/incidents/{inc_id}.json"
+        self.fs.write_file(path, incident)
+        self._emit("fs_change", path=path, action="write", size=len(incident))
         count = int(self.kv.get("incident:active_count", "0")) + 1
         self.kv.set("incident:active_count", str(count))
         return inc_id
@@ -141,7 +162,10 @@ class CityTools:
         """Patch a file in the staging overlay."""
         if err := self._validate_path(path):
             return err
+        old_content = self.fs.read_file(path)
         self.overlay.write_file(path, content)
+        self._emit("code_diff", path=path, old_content=old_content, new_content=content, action="stage")
+        self._emit("fs_change", path=path, action="stage", size=len(content))
         return f"Patched {path} in staging ({len(content)} bytes)"
 
     def hotfix_prod(self, service: str) -> str:
@@ -154,6 +178,25 @@ class CityTools:
         changes = self.overlay.list_changes()
         if not changes:
             return f"No staged changes to merge (context: {service})"
+        for change in changes:
+            if change.change_type == "modified":
+                old_content = self.fs.read_file(change.path)
+                new_content = self.overlay.read_file(change.path)
+                self._emit(
+                    "code_diff",
+                    path=change.path,
+                    old_content=old_content,
+                    new_content=new_content,
+                    action="merge",
+                )
+                self._emit(
+                    "fs_change",
+                    path=change.path,
+                    action="merge",
+                    size=len(new_content) if new_content is not None else 0,
+                )
+            elif change.change_type == "deleted":
+                self._emit("fs_change", path=change.path, action="delete", size=0)
         self.overlay.merge()
         return f"Hotfix applied: {len(changes)} files merged to production (context: {service})"
 
@@ -163,5 +206,8 @@ class CityTools:
         Note: discards ALL overlay changes. The service parameter is used
         for logging context only.
         """
+        changes = self.overlay.list_changes()
+        for change in changes:
+            self._emit("fs_change", path=change.path, action="delete", size=0)
         self.overlay.discard()
         return f"Rolled back all staged changes (context: {service})"
