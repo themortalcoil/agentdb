@@ -146,13 +146,10 @@ class CityTools:
         entire staging layer. Scoped merges can be added later if needed.
         """
         changes = self.overlay.list_changes()
-        service_changes = [c for c in changes if service in c.path]
-        if not service_changes:
-            return f"No staged changes for {service}"
+        if not changes:
+            return f"No staged changes to merge (context: {service})"
         self.overlay.merge()
-        return (
-            f"Hotfix applied: {len(service_changes)} files merged to production"
-        )
+        return f"Hotfix applied: {len(changes)} files merged to production (context: {service})"
 
     def rollback(self, service: str) -> str:
         """Discard all staging changes (rollback).
