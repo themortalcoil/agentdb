@@ -11,7 +11,7 @@ class Broadcaster:
         self._connections: set[asyncio.Queue] = set()
 
     def subscribe(self) -> asyncio.Queue:
-        queue: asyncio.Queue = asyncio.Queue()
+        queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
         self._connections.add(queue)
         return queue
 

@@ -32,7 +32,10 @@ def create_app(broadcaster: Broadcaster, engine=None) -> FastAPI:
                 try:
                     while True:
                         data = await ws.receive_text()
-                        msg = json.loads(data)
+                        try:
+                            msg = json.loads(data)
+                        except json.JSONDecodeError:
+                            continue
                         if engine and msg.get("action") == "pause":
                             engine.pause()
                         elif engine and msg.get("action") == "resume":
