@@ -26,6 +26,7 @@ def create_app(broadcaster: Broadcaster, engine=None) -> FastAPI:
     async def websocket_endpoint(ws: WebSocket):
         await ws.accept()
         queue = broadcaster.subscribe()
+        read_task = None
         try:
             async def read_client():
                 try:
@@ -48,7 +49,8 @@ def create_app(broadcaster: Broadcaster, engine=None) -> FastAPI:
             pass
         finally:
             broadcaster.unsubscribe(queue)
-            read_task.cancel()
+            if read_task is not None:
+                read_task.cancel()
 
     @app.get("/api/state")
     async def get_state():
