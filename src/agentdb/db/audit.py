@@ -24,7 +24,7 @@ class AuditLog:
         result: str | None,
         error: str | None = None,
         agent_name: str | None = None,
-    ) -> int:
+    ) -> int | None:
         now_ms = int(time.time() * 1000)
         cursor = self._conn.execute(
             """INSERT INTO tool_calls
