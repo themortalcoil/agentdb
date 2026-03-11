@@ -67,7 +67,7 @@ class OverlayFS:
 
     def merge(self) -> None:
         """Apply all overlay changes to the base filesystem."""
-        self._merge_recursive(f"/{OVERLAY_PREFIX}", "/")
+        self._merge_recursive(f"/{OVERLAY_PREFIX}", "")
 
         # Apply whiteout deletions
         whiteouts = self._conn.execute(
@@ -109,7 +109,7 @@ class OverlayFS:
 
     def list_changes(self) -> list[OverlayChange]:
         changes: list[OverlayChange] = []
-        self._collect_changes(f"/{OVERLAY_PREFIX}", "/", changes)
+        self._collect_changes(f"/{OVERLAY_PREFIX}", "", changes)
         whiteouts = self._conn.execute(
             "SELECT path FROM fs_whiteout"
         ).fetchall()

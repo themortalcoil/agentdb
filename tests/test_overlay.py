@@ -70,3 +70,6 @@ def test_list_changes(db):
     overlay.delete_file("/city/services/power-grid/config.json")
     changes = overlay.list_changes()
     assert len(changes) == 2
+    by_type = {c.change_type: c for c in changes}
+    assert by_type["modified"].path == "/city/services/power-grid/main.py"
+    assert by_type["deleted"].path == "/city/services/power-grid/config.json"
