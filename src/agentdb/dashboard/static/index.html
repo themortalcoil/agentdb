@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentDB City Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <h1 class="header-title">AgentDB <span class="header-accent">City Dashboard</span></h1>
+      <div class="header-divider"></div>
+      <div class="connection-status" id="connectionStatus">
+        <span class="status-dot disconnected"></span>
+        <span class="status-label">Disconnected</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="tick-display">
+        <span class="tick-label">TICK</span>
+        <span class="tick-value" id="tickCounter">0</span>
+      </div>
+      <button class="btn-control" id="pauseBtn" onclick="togglePause()">
+        <span class="btn-icon" id="pauseIcon">&#9646;&#9646;</span>
+        <span id="pauseLabel">Pause</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Grid -->
+  <main class="dashboard-grid">
+
+    <!-- Left Panel: City Map -->
+    <section class="panel panel-map">
+      <div class="panel-header">
+        <h2 class="panel-title">City Service Map</h2>
+        <span class="panel-badge" id="serviceCount">4 services</span>
+      </div>
+      <div class="canvas-container">
+        <canvas id="cityCanvas"></canvas>
+      </div>
+    </section>
+
+    <!-- Right Top: Activity Feed -->
+    <section class="panel panel-feed">
+      <div class="panel-header">
+        <h2 class="panel-title">Activity Feed</h2>
+        <button class="btn-clear" onclick="clearFeed()">Clear</button>
+      </div>
+      <div class="feed-list" id="activityFeed">
+        <div class="feed-empty">Waiting for events...</div>
+      </div>
+    </section>
+
+    <!-- Right Bottom: Agent Status -->
+    <section class="panel panel-agents">
+      <div class="panel-header">
+        <h2 class="panel-title">Agent Status</h2>
+      </div>
+      <div class="agent-grid" id="agentGrid">
+        <div class="agent-card" data-agent="mayor">
+          <div class="agent-icon">&#9733;</div>
+          <div class="agent-info">
+            <div class="agent-name">Mayor</div>
+            <div class="agent-role">City Coordinator</div>
+            <div class="energy-bar-container">
+              <div class="energy-bar" id="energy-mayor" style="width: 100%"></div>
+            </div>
+            <div class="agent-status-text" id="status-mayor">Idle</div>
+          </div>
+        </div>
+        <div class="agent-card" data-agent="engineer">
+          <div class="agent-icon">&#9881;</div>
+          <div class="agent-info">
+            <div class="agent-name">Engineer</div>
+            <div class="agent-role">Infrastructure</div>
+            <div class="energy-bar-container">
+              <div class="energy-bar" id="energy-engineer" style="width: 100%"></div>
+            </div>
+            <div class="agent-status-text" id="status-engineer">Idle</div>
+          </div>
+        </div>
+        <div class="agent-card" data-agent="monitor">
+          <div class="agent-icon">&#9673;</div>
+          <div class="agent-info">
+            <div class="agent-name">Monitor</div>
+            <div class="agent-role">Surveillance</div>
+            <div class="energy-bar-container">
+              <div class="energy-bar" id="energy-monitor" style="width: 100%"></div>
+            </div>
+            <div class="agent-status-text" id="status-monitor">Idle</div>
+          </div>
+        </div>
+        <div class="agent-card" data-agent="fixer">
+          <div class="agent-icon">&#9888;</div>
+          <div class="agent-info">
+            <div class="agent-name">Fixer</div>
+            <div class="agent-role">Incident Response</div>
+            <div class="energy-bar-container">
+              <div class="energy-bar" id="energy-fixer" style="width: 100%"></div>
+            </div>
+            <div class="agent-status-text" id="status-fixer">Idle</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bottom: Service Detail -->
+    <section class="panel panel-detail">
+      <div class="panel-header">
+        <h2 class="panel-title">Service Detail</h2>
+        <span class="panel-badge" id="selectedServiceName">Select a service</span>
+      </div>
+      <div class="detail-content" id="serviceDetail">
+        <div class="detail-placeholder">Click a service node on the map to view details</div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer: Timeline -->
+  <footer class="footer">
+    <div class="timeline-bar">
+      <div class="timeline-progress" id="timelineProgress"></div>
+    </div>
+    <div class="footer-info">
+      <span class="footer-label">AgentDB Simulation v0.1.0</span>
+      <span class="footer-label" id="eventCount">0 events</span>
+    </div>
+  </footer>
+
+  <script src="/static/graph.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
