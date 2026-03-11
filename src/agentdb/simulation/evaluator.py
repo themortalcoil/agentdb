@@ -56,6 +56,10 @@ class ServiceEvaluator:
 
         try:
             raw = module.handle_load(load, config)
+            if not isinstance(raw, dict):
+                return ServiceResult.failed(
+                    f"handle_load() must return dict, got {type(raw).__name__}"
+                )
             return ServiceResult(
                 status=raw.get("status", "failed"),
                 capacity=raw.get("capacity", 0.0),

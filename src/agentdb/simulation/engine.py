@@ -65,6 +65,7 @@ class SimulationEngine:
             result = self._evaluator.evaluate(service, load)
             old_status = self._kv.get(f"service:{service}:status", "ok")
             self._kv.set(f"service:{service}:status", result.status)
+            self._kv.set(f"service:{service}:capacity", f"{result.capacity:.3f}")
 
             if result.status == "failed" and old_status != "failed":
                 event = CityEvent(
@@ -76,8 +77,10 @@ class SimulationEngine:
                 )
                 all_events.append(event)
                 failed_services.append(service)
-            elif result.status == "degraded" and load > float(
-                self._kv.get(f"service:{service}:capacity", "1.0")
+            elif (
+                result.status == "degraded"
+                and old_status != "degraded"
+                and load > result.capacity
             ):
                 event = CityEvent(
                     event_type=EventType.DEMAND_SPIKE,
