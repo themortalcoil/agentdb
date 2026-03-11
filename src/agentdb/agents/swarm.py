@@ -37,9 +37,11 @@ def _make_langchain_tools(city_tools: CityTools, tool_names: list[str]) -> list:
     return tools
 
 
-def build_swarm(fs: VirtualFS, kv: KVStore, overlay: OverlayFS):
+def build_swarm(fs: VirtualFS, kv: KVStore, overlay: OverlayFS,
+                event_buffer: list | None = None):
     """Build and compile the LangGraph Swarm with all city agents."""
-    city_tools = CityTools(fs=fs, kv=kv, overlay=overlay)
+    city_tools = CityTools(fs=fs, kv=kv, overlay=overlay,
+                           event_buffer=event_buffer)
     agents = []
 
     for config in AGENT_CONFIGS.values():
