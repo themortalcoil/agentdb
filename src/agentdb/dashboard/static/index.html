@@ -111,14 +111,167 @@
       </div>
     </section>
 
-    <!-- Bottom: Service Detail -->
-    <section class="panel panel-detail">
-      <div class="panel-header">
-        <h2 class="panel-title">Service Detail</h2>
-        <span class="panel-badge" id="selectedServiceName">Select a service</span>
+    <!-- Bottom: Tabbed Detail Panel -->
+    <section class="panel panel-detail" x-data="detailPanel">
+      <div class="panel-header tab-bar">
+        <button class="tab-btn" :class="{ active: tab === 'conversations' }" @click="tab = 'conversations'">Conversations</button>
+        <button class="tab-btn" :class="{ active: tab === 'diffs' }" @click="tab = 'diffs'">Code Diffs</button>
+        <button class="tab-btn" :class="{ active: tab === 'filesystem' }" @click="tab = 'filesystem'">Filesystem</button>
+        <button class="tab-btn" :class="{ active: tab === 'service' }" @click="tab = 'service'">Service Detail</button>
       </div>
-      <div class="detail-content" id="serviceDetail">
-        <div class="detail-placeholder">Click a service node on the map to view details</div>
+
+      <!-- Conversations Tab -->
+      <div class="tab-content" x-show="tab === 'conversations'" x-cloak>
+        <template x-if="conversations.length === 0">
+          <div class="detail-placeholder">Waiting for agent activity...</div>
+        </template>
+        <template x-for="(msg, idx) in conversations" :key="msg.cycle_id + '-' + msg.agent + '-' + idx">
+          <div class="conversation-card" :style="'border-left-color:' + agentColor(msg.agent)">
+            <div class="conv-header">
+              <span class="conv-agent" :style="'color:' + agentColor(msg.agent)" x-text="msg.agent"></span>
+              <span class="conv-tick" x-text="'#' + msg.tick"></span>
+            </div>
+            <div class="conv-body" x-text="msg.message"></div>
+            <div class="conv-footer">
+              <template x-for="tool in msg.tools_used || []">
+                <span class="conv-tool-tag" x-text="tool"></span>
+              </template>
+              <template x-if="msg.handoff_to">
+                <span class="conv-handoff">&rarr; <span x-text="msg.handoff_to"></span></span>
+              </template>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- Code Diffs Tab -->
+      <div class="tab-content" x-show="tab === 'diffs'" x-cloak>
+        <template x-if="diffs.length === 0">
+          <div class="detail-placeholder">No code changes yet...</div>
+        </template>
+        <template x-for="(diff, idx) in diffs" :key="idx">
+          <details class="diff-block" open>
+            <summary class="diff-header">
+              <span class="diff-path" x-text="diff.path"></span>
+              <span class="diff-meta">
+                <span class="conv-tool-tag" x-text="diff.action"></span>
+                <span class="conv-agent" :style="'color:' + agentColor(diff.agent)" x-text="diff.agent"></span>
+                <span class="conv-tick" x-text="'#' + diff.tick"></span>
+              </span>
+            </summary>
+            <div class="diff-content">
+              <template x-for="line in computeDiff(diff.old_content, diff.new_content)">
+                <div class="diff-line" :class="line.type" x-text="line.text"></div>
+              </template>
+            </div>
+          </details>
+        </template>
+      </div>
+
+      <!-- Filesystem Tab -->
+      <div class="tab-content tab-filesystem" x-show="tab === 'filesystem'" x-cloak>
+        <div class="fs-tree">
+          <template x-if="Object.keys(fsTree).length === 0">
+            <div class="detail-placeholder">Waiting for filesystem snapshot...</div>
+          </template>
+          <template x-for="[name, value] in sortedEntries(fsTree)" :key="name">
+            <div x-data="{ open: true }">
+              <template x-if="isDir(value)">
+                <div>
+                  <div class="fs-dir" @click="open = !open">
+                    <span class="fs-toggle" x-text="open ? '&#9660;' : '&#9654;'"></span>
+                    <span x-text="name"></span>/
+                  </div>
+                  <div x-show="open" style="padding-left: 16px;">
+                    <template x-for="[cname, cval] in sortedEntries(value)" :key="cname">
+                      <div>
+                        <template x-if="isDir(cval)">
+                          <div x-data="{ subOpen: false }">
+                            <div class="fs-dir" @click="subOpen = !subOpen">
+                              <span class="fs-toggle" x-text="subOpen ? '&#9660;' : '&#9654;'"></span>
+                              <span x-text="cname"></span>/
+                            </div>
+                            <div x-show="subOpen" style="padding-left: 16px;">
+                              <template x-for="[fname, fval] in sortedEntries(cval)" :key="fname">
+                                <div>
+                                  <template x-if="isDir(fval)">
+                                    <div x-data="{ deepOpen: false }">
+                                      <div class="fs-dir" @click="deepOpen = !deepOpen">
+                                        <span class="fs-toggle" x-text="deepOpen ? '&#9660;' : '&#9654;'"></span>
+                                        <span x-text="fname"></span>/
+                                      </div>
+                                      <div x-show="deepOpen" style="padding-left: 16px;">
+                                        <template x-for="[dname, dval] in sortedEntries(fval)" :key="dname">
+                                          <div class="fs-file" :data-fspath="'/' + name + '/' + cname + '/' + fname + '/' + dname"
+                                               @click="loadFile('/' + name + '/' + cname + '/' + fname + '/' + dname)">
+                                            <span x-text="dname"></span>
+                                            <span class="fs-size" x-text="typeof dval === 'number' ? dval + 'B' : ''"></span>
+                                          </div>
+                                        </template>
+                                      </div>
+                                    </div>
+                                  </template>
+                                  <template x-if="!isDir(fval)">
+                                    <div class="fs-file" :data-fspath="'/' + name + '/' + cname + '/' + fname"
+                                         @click="loadFile('/' + name + '/' + cname + '/' + fname)">
+                                      <span x-text="fname"></span>
+                                      <span class="fs-size" x-text="typeof fval === 'number' ? fval + 'B' : ''"></span>
+                                    </div>
+                                  </template>
+                                </div>
+                              </template>
+                            </div>
+                          </div>
+                        </template>
+                        <template x-if="!isDir(cval)">
+                          <div class="fs-file" :data-fspath="'/' + name + '/' + cname"
+                               @click="loadFile('/' + name + '/' + cname)">
+                            <span x-text="cname"></span>
+                            <span class="fs-size" x-text="cval + 'B'"></span>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+        <div class="fs-preview" x-show="selectedFile">
+          <div class="fs-preview-header" x-text="selectedFile || ''"></div>
+          <pre class="fs-preview-content" x-text="fileContent || ''"></pre>
+        </div>
+      </div>
+
+      <!-- Service Detail Tab -->
+      <div class="tab-content" x-show="tab === 'service'" x-cloak>
+        <template x-if="!serviceDetail">
+          <div class="detail-placeholder">Click a service node on the map to view details</div>
+        </template>
+        <template x-if="serviceDetail">
+          <div>
+            <div class="panel-badge" x-text="serviceDetail.name" style="margin-bottom: 8px;"></div>
+            <div class="detail-grid">
+              <div class="detail-item">
+                <span class="detail-label">Status</span>
+                <span class="detail-value" :class="serviceDetail.status" x-text="serviceDetail.status.toUpperCase()"></span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">Load</span>
+                <span class="detail-value" x-text="(serviceDetail.load * 100).toFixed(1) + '%'"></span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">Capacity</span>
+                <span class="detail-value" x-text="(serviceDetail.capacity * 100).toFixed(1) + '%'"></span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">Headroom</span>
+                <span class="detail-value" :class="serviceDetail.status" x-text="serviceDetail.health + '%'"></span>
+              </div>
+            </div>
+          </div>
+        </template>
       </div>
     </section>
 
@@ -135,7 +288,9 @@
     </div>
   </footer>
 
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
   <script src="/static/graph.js"></script>
   <script src="/static/app.js"></script>
+  <script src="/static/detail-tabs.js"></script>
 </body>
 </html>

@@ -94,6 +94,19 @@
       case "agent_update":
         handleAgentUpdate(msg.data);
         break;
+      case "agent_message":
+        window.dispatchEvent(new CustomEvent("agentdb:agent-message", { detail: msg.data }));
+        break;
+      case "code_diff":
+        window.dispatchEvent(new CustomEvent("agentdb:code-diff", { detail: msg.data }));
+        break;
+      case "fs_change":
+        window.dispatchEvent(new CustomEvent("agentdb:fs-change", { detail: msg.data }));
+        break;
+      case "fs_snapshot":
+        window.__agentdb_fs_snapshot = msg.data;
+        window.dispatchEvent(new CustomEvent("agentdb:fs-snapshot", { detail: msg.data }));
+        break;
       default:
         console.log("[ws] unknown type:", msg.type);
     }
@@ -242,55 +255,6 @@
     empty.className = "feed-empty";
     empty.textContent = "Waiting for events...";
     activityFeed.appendChild(empty);
-  };
-
-  // ---- Service Detail ----
-
-  window.selectService = function (name, status, load, capacity) {
-    var badge = document.getElementById("selectedServiceName");
-    var detail = document.getElementById("serviceDetail");
-
-    badge.textContent = name;
-
-    var statusClass = status === "ok" ? "ok" : status === "degraded" ? "degraded" : "failed";
-    var loadPct = (load * 100).toFixed(1);
-    var capPct  = (capacity * 100).toFixed(1);
-    var health  = capacity > 0 ? Math.min(100, ((capacity - load) / capacity * 100)).toFixed(0) : 0;
-
-    // Build detail grid with safe DOM methods
-    while (detail.firstChild) {
-      detail.removeChild(detail.firstChild);
-    }
-
-    var grid = document.createElement("div");
-    grid.className = "detail-grid";
-
-    var items = [
-      { label: "Status",   value: status.toUpperCase(), cls: statusClass },
-      { label: "Load",     value: loadPct + "%",        cls: "" },
-      { label: "Capacity", value: capPct + "%",         cls: "" },
-      { label: "Headroom", value: health + "%",         cls: statusClass }
-    ];
-
-    for (var i = 0; i < items.length; i++) {
-      var item = items[i];
-      var div = document.createElement("div");
-      div.className = "detail-item";
-
-      var lbl = document.createElement("span");
-      lbl.className = "detail-label";
-      lbl.textContent = item.label;
-
-      var val = document.createElement("span");
-      val.className = "detail-value" + (item.cls ? " " + item.cls : "");
-      val.textContent = item.value;
-
-      div.appendChild(lbl);
-      div.appendChild(val);
-      grid.appendChild(div);
-    }
-
-    detail.appendChild(grid);
   };
 
   // ---- Init ----
