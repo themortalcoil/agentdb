@@ -250,6 +250,7 @@ SCHEMA_SQL = """
 -- Tool call audit trail
 CREATE TABLE IF NOT EXISTS tool_calls (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_name TEXT,
     name TEXT NOT NULL,
     parameters TEXT,
     result TEXT,
@@ -258,6 +259,7 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     completed_at INTEGER NOT NULL,
     duration_ms INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_tool_calls_agent ON tool_calls(agent_name);
 CREATE INDEX IF NOT EXISTS idx_tool_calls_name ON tool_calls(name);
 CREATE INDEX IF NOT EXISTS idx_tool_calls_started_at ON tool_calls(started_at);
 
@@ -579,13 +581,14 @@ class AuditLog:
         parameters: str,
         result: str | None,
         error: str | None = None,
+        agent_name: str | None = None,
     ) -> int:
         now_ms = int(time.time() * 1000)
         cursor = self._conn.execute(
             """INSERT INTO tool_calls
-               (name, parameters, result, error, started_at, completed_at, duration_ms)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (name, parameters, result, error, now_ms, now_ms, 0),
+               (agent_name, name, parameters, result, error, started_at, completed_at, duration_ms)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (agent_name, name, parameters, result, error, now_ms, now_ms, 0),
         )
         self._conn.commit()
         return cursor.lastrowid
@@ -603,9 +606,9 @@ class AuditLog:
             completed = int(time.time() * 1000)
             self._conn.execute(
                 """INSERT INTO tool_calls
-                   (name, parameters, result, error, started_at, completed_at, duration_ms)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (name, parameters, tracker.result, tracker.error,
+                   (agent_name, name, parameters, result, error, started_at, completed_at, duration_ms)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (None, name, parameters, tracker.result, tracker.error,
                  started, completed, completed - started),
             )
             self._conn.commit()
@@ -2074,12 +2077,11 @@ class CityTools:
         })
 
     def check_health(self) -> str:
-        """Check health of all services."""
-        services = [
-            "power-grid", "water-system", "traffic-control", "comms-network"
-        ]
+        """Check health of all services (discovered from KV store)."""
+        service_keys = self.kv.list_prefix("service:")
+        service_names = {k.split(":")[1] for k, _ in service_keys}
         health = {}
-        for svc in services:
+        for svc in sorted(service_names):
             health[svc] = {
                 "status": self.kv.get(f"service:{svc}:status", "unknown"),
                 "load": self.kv.get(f"service:{svc}:load", "0"),
@@ -2114,7 +2116,12 @@ class CityTools:
         return f"Patched {path} in staging ({len(content)} bytes)"
 
     def hotfix_prod(self, service: str) -> str:
-        """Merge staging overlay changes into production."""
+        """Merge staging overlay changes into production.
+
+        Note: merges ALL overlay changes, not just the target service.
+        This is intentional — in a real incident, the Fixer owns the
+        entire staging layer. Scoped merges can be added later if needed.
+        """
         changes = self.overlay.list_changes()
         service_changes = [c for c in changes if service in c.path]
         if not service_changes:
@@ -2125,9 +2132,13 @@ class CityTools:
         )
 
     def rollback(self, service: str) -> str:
-        """Discard all staging changes (rollback)."""
+        """Discard all staging changes (rollback).
+
+        Note: discards ALL overlay changes. The service parameter is used
+        for logging context only.
+        """
         self.overlay.discard()
-        return f"Rolled back all staged changes for {service}"
+        return f"Rolled back all staged changes"
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -2301,6 +2312,7 @@ AGENT_CONFIGS: dict[str, AgentConfig] = {
 from langchain.tools import tool
 from langchain_ollama import ChatOllama
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.prebuilt import create_react_agent
 from langgraph_swarm import create_handoff_tool, create_swarm
 
 from agentdb.agents.definitions import AGENT_CONFIGS
@@ -2347,12 +2359,10 @@ def build_swarm(fs: VirtualFS, kv: KVStore, overlay: OverlayFS):
         ]
         lc_tools = _make_langchain_tools(city_tools, config.tool_names)
 
-        from langchain.agents import create_agent
-
-        agent = create_agent(
+        agent = create_react_agent(
             llm,
             tools=lc_tools + handoff_tools,
-            system_prompt=config.system_prompt,
+            prompt=config.system_prompt,
             name=config.name,
         )
         agents.append(agent)
@@ -2504,10 +2514,48 @@ def create_app(broadcaster: Broadcaster, engine=None) -> FastAPI:
     return app
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Write tests for broadcast.py**
+
+`tests/test_broadcast.py`:
+```python
+import asyncio
+from agentdb.dashboard.broadcast import Broadcaster
+
+
+async def test_subscribe_and_broadcast():
+    b = Broadcaster()
+    queue = b.subscribe()
+    await b.broadcast("tick", {"tick": 1})
+    msg = queue.get_nowait()
+    assert '"tick"' in msg
+    assert b.connection_count == 1
+
+
+async def test_unsubscribe():
+    b = Broadcaster()
+    queue = b.subscribe()
+    b.unsubscribe(queue)
+    assert b.connection_count == 0
+
+
+async def test_broadcast_to_multiple():
+    b = Broadcaster()
+    q1 = b.subscribe()
+    q2 = b.subscribe()
+    await b.broadcast("test", {"data": "hello"})
+    assert not q1.empty()
+    assert not q2.empty()
+```
+
+- [ ] **Step 4: Run tests**
+
+Run: `uv run pytest tests/test_broadcast.py -v`
+Expected: 3 passed
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add src/agentdb/dashboard/__init__.py src/agentdb/dashboard/broadcast.py src/agentdb/dashboard/app.py
+git add src/agentdb/dashboard/ tests/test_broadcast.py
 git commit -m "feat: FastAPI dashboard backend with WebSocket broadcasting"
 ```
 
@@ -2638,9 +2686,23 @@ git commit -m "chore: end-to-end verification complete"
 
 ### LangGraph Swarm API
 
-The swarm uses `langchain.agents.create_agent` and `langgraph_swarm.create_swarm`. If these APIs have changed, check latest docs:
+The swarm uses `langgraph.prebuilt.create_react_agent` and `langgraph_swarm.create_swarm`. If APIs have changed, check latest docs:
 - LangGraph Swarm context7 ID: `/langchain-ai/langgraph-swarm-py`
 - LangGraph context7 ID: `/websites/langchain_oss_python_langgraph`
+
+### Agent Energy/Mood System
+
+Agent energy and mood are stored in KV store (`agent:{name}:energy`, `agent:{name}:mood`). The mechanism for influencing behavior is prompt injection: the swarm module reads each agent's state from KV and prepends it to their system prompt before each invocation. This is an emergent feature — the LLM adjusts its behavior based on the mood context, not a hard mechanic. Implement this by making the system prompt a callable that reads KV at invocation time (same pattern as the customer support example in the LangGraph Swarm docs).
+
+### Deferred Features
+
+These spec features are intentionally deferred to keep the initial build focused. Add them after the core system works:
+- Inject event, override priority, agent kill switch, speed slider backend handlers
+- Agent stuck-in-loop detection (>5 actions counter)
+- Circuit breaker for cascade spirals
+- LLM retry logic (3 retries)
+- Ollama-unreachable auto-pause
+- Time-series metrics history (for load charts)
 
 ### Ollama Cloud Models
 
