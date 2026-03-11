@@ -27,6 +27,11 @@ document.addEventListener("alpine:init", function () {
       init: function () {
         var self = this;
 
+        // Apply cached snapshot that arrived before Alpine initialized
+        if (window.__agentdb_fs_snapshot) {
+          self.fsTree = window.__agentdb_fs_snapshot.tree || {};
+        }
+
         window.addEventListener("agentdb:agent-message", function (e) {
           self.conversations.unshift(e.detail);
           if (self.conversations.length > MAX_CONVERSATIONS) {

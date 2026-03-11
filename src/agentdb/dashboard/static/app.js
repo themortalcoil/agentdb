@@ -104,6 +104,7 @@
         window.dispatchEvent(new CustomEvent("agentdb:fs-change", { detail: msg.data }));
         break;
       case "fs_snapshot":
+        window.__agentdb_fs_snapshot = msg.data;
         window.dispatchEvent(new CustomEvent("agentdb:fs-snapshot", { detail: msg.data }));
         break;
       default:

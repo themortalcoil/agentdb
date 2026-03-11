@@ -193,10 +193,31 @@
                             </div>
                             <div x-show="subOpen" style="padding-left: 16px;">
                               <template x-for="[fname, fval] in sortedEntries(cval)" :key="fname">
-                                <div class="fs-file" :data-fspath="'/' + name + '/' + cname + '/' + fname"
-                                     @click="loadFile('/' + name + '/' + cname + '/' + fname)">
-                                  <span x-text="fname"></span>
-                                  <span class="fs-size" x-text="typeof fval === 'number' ? fval + 'B' : ''"></span>
+                                <div>
+                                  <template x-if="isDir(fval)">
+                                    <div x-data="{ deepOpen: false }">
+                                      <div class="fs-dir" @click="deepOpen = !deepOpen">
+                                        <span class="fs-toggle" x-text="deepOpen ? '&#9660;' : '&#9654;'"></span>
+                                        <span x-text="fname"></span>/
+                                      </div>
+                                      <div x-show="deepOpen" style="padding-left: 16px;">
+                                        <template x-for="[dname, dval] in sortedEntries(fval)" :key="dname">
+                                          <div class="fs-file" :data-fspath="'/' + name + '/' + cname + '/' + fname + '/' + dname"
+                                               @click="loadFile('/' + name + '/' + cname + '/' + fname + '/' + dname)">
+                                            <span x-text="dname"></span>
+                                            <span class="fs-size" x-text="typeof dval === 'number' ? dval + 'B' : ''"></span>
+                                          </div>
+                                        </template>
+                                      </div>
+                                    </div>
+                                  </template>
+                                  <template x-if="!isDir(fval)">
+                                    <div class="fs-file" :data-fspath="'/' + name + '/' + cname + '/' + fname"
+                                         @click="loadFile('/' + name + '/' + cname + '/' + fname)">
+                                      <span x-text="fname"></span>
+                                      <span class="fs-size" x-text="typeof fval === 'number' ? fval + 'B' : ''"></span>
+                                    </div>
+                                  </template>
                                 </div>
                               </template>
                             </div>
