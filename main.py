@@ -191,9 +191,11 @@ async def main() -> None:
 
             # --- Broadcast buffered file events ---
             for event in event_buffer:
-                event["tick"] = engine.tick
-                event["agent"] = current_agent
-                await broadcaster.broadcast(event.pop("type"), event)
+                etype = event["type"]
+                payload = {k: v for k, v in event.items() if k != "type"}
+                payload["tick"] = engine.tick
+                payload["agent"] = current_agent
+                await broadcaster.broadcast(etype, payload)
             event_buffer.clear()
 
             # --- Agent status updates ---

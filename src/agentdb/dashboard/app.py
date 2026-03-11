@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import posixpath
 from pathlib import Path
 
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
@@ -84,11 +85,12 @@ def create_app(broadcaster: Broadcaster, engine=None, fs=None) -> FastAPI:
 
     @app.get("/api/file")
     async def get_file(path: str = Query(...)):
-        if not path.startswith("/city/"):
+        normalized = posixpath.normpath(path)
+        if not normalized.startswith("/city/"):
             return JSONResponse({"error": "Path must start with /city/"}, status_code=400)
         if fs is None:
             return JSONResponse({"error": "Filesystem not available"}, status_code=500)
-        content = fs.read_file(path)
+        content = fs.read_file(normalized)
         if content is None:
             return JSONResponse({"error": "File not found"}, status_code=404)
         return PlainTextResponse(content)

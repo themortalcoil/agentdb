@@ -125,7 +125,7 @@
         <template x-if="conversations.length === 0">
           <div class="detail-placeholder">Waiting for agent activity...</div>
         </template>
-        <template x-for="msg in conversations" :key="msg.cycle_id + '-' + msg.agent">
+        <template x-for="(msg, idx) in conversations" :key="msg.cycle_id + '-' + msg.agent + '-' + idx">
           <div class="conversation-card" :style="'border-left-color:' + agentColor(msg.agent)">
             <div class="conv-header">
               <span class="conv-agent" :style="'color:' + agentColor(msg.agent)" x-text="msg.agent"></span>

@@ -43,6 +43,13 @@ def test_api_file_400_bad_path(app_fixtures):
     assert resp.status_code == 400
 
 
+def test_api_file_400_path_traversal(app_fixtures):
+    client, _, _ = app_fixtures
+
+    resp = client.get("/api/file", params={"path": "/city/../../etc/passwd"})
+    assert resp.status_code == 400
+
+
 def test_build_fs_tree(app_fixtures):
     _, fs, _ = app_fixtures
     fs.write_file("/city/services/power-grid/main.py", "code here")

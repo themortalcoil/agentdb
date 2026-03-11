@@ -88,7 +88,7 @@ document.addEventListener("alpine:init", function () {
       // --- Filesystem tree ---
       applyFsChange: function (data) {
         var parts = data.path.replace(/^\//, "").split("/");
-        if (data.action === "write") {
+        if (data.action === "write" || data.action === "stage" || data.action === "merge") {
           var node = this.fsTree;
           for (var i = 0; i < parts.length - 1; i++) {
             if (!node[parts[i]] || typeof node[parts[i]] !== "object") {
@@ -111,7 +111,7 @@ document.addEventListener("alpine:init", function () {
           if (el) {
             el.classList.remove("fs-flash-write", "fs-flash-delete");
             void el.offsetWidth; // force reflow
-            el.classList.add(data.action === "write" ? "fs-flash-write" : "fs-flash-delete");
+            el.classList.add(data.action === "delete" ? "fs-flash-delete" : "fs-flash-write");
           }
         });
       },
@@ -162,15 +162,9 @@ document.addEventListener("alpine:init", function () {
 
   // Expose selectService globally for graph.js compatibility
   window.selectService = function (name, status, load, capacity) {
-    var el = document.querySelector("[x-data]");
-    if (el && el.__x) {
-      el.__x.$data.selectService(name, status, load, capacity);
-    } else {
-      // Alpine v3: use $data from the component
-      var component = Alpine.$data(document.querySelector(".panel-detail"));
-      if (component) {
-        component.selectService(name, status, load, capacity);
-      }
+    var component = Alpine.$data(document.querySelector(".panel-detail"));
+    if (component) {
+      component.selectService(name, status, load, capacity);
     }
   };
 
