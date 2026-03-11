@@ -122,10 +122,23 @@ async def main() -> None:
     # 8. Background simulation loop
     thread_id = "city-sim"
 
+    all_agent_names = list(SERVICE_CONFIGS.keys())  # not agents, but we want the 4 agent names
+    all_agent_names = ["mayor", "engineer", "monitor", "fixer"]
+
     async def run_agents() -> None:
         """Invoke the agent swarm to observe and act on city state."""
         if swarm is None:
             return
+
+        # Broadcast "working" for all agents so the dashboard shows activity
+        for name in all_agent_names:
+            await broadcaster.broadcast("agent_update", {
+                "agent": name,
+                "status": "working",
+                "message": f"Checking city health (tick {engine.tick})...",
+                "tick": engine.tick,
+            })
+
         try:
             from langchain_core.messages import HumanMessage
 
@@ -138,19 +151,67 @@ async def main() -> None:
                 {"messages": [HumanMessage(content=prompt)]},
                 config={"configurable": {"thread_id": thread_id}},
             )
-            # Broadcast agent activity to dashboard
-            last_msg = result["messages"][-1]
-            agent_name = getattr(last_msg, "name", None) or "swarm"
-            await broadcaster.broadcast("agent_update", {
-                "agent": agent_name,
-                "status": "acted",
-                "message": last_msg.content[:200] if last_msg.content else "",
-                "tick": engine.tick,
-            })
-            print(f"[tick {engine.tick}] Agent '{agent_name}': {last_msg.content[:120]}")
+
+            # Find all agents that participated in this conversation
+            participated: dict[str, str] = {}
+            for msg in result["messages"]:
+                name = getattr(msg, "name", None)
+                if name and name in all_agent_names and getattr(msg, "content", ""):
+                    participated[name] = msg.content[:200]
+
+            # Broadcast status for each participating agent
+            for name, summary in participated.items():
+                await broadcaster.broadcast("agent_update", {
+                    "agent": name,
+                    "status": "acted",
+                    "message": summary,
+                    "tick": engine.tick,
+                })
+                # Also push into the activity feed
+                await broadcaster.broadcast("city_event", {
+                    "event_type": "agent_action",
+                    "service": name,
+                    "severity": "low",
+                    "message": f"Agent {name}: {summary[:120]}",
+                    "tick": engine.tick,
+                })
+
+            # Mark non-participating agents as idle
+            for name in all_agent_names:
+                if name not in participated:
+                    await broadcaster.broadcast("agent_update", {
+                        "agent": name,
+                        "status": "idle",
+                        "message": "",
+                        "tick": engine.tick,
+                    })
+
+            print(f"[tick {engine.tick}] Agents: {', '.join(participated.keys()) or 'none'}")
         except Exception as exc:
             print(f"[tick {engine.tick}] Agent error: {exc}")
             traceback.print_exc()
+            # Broadcast error so dashboard reflects the failure
+            for name in all_agent_names:
+                await broadcaster.broadcast("agent_update", {
+                    "agent": name,
+                    "status": "error",
+                    "message": str(exc)[:200],
+                    "tick": engine.tick,
+                })
+
+    async def broadcast_tick() -> None:
+        """Broadcast current tick + service states to all dashboard clients."""
+        services = {}
+        for name in SERVICE_CONFIGS:
+            services[name] = {
+                "status": kv.get(f"service:{name}:status", "ok"),
+                "load": float(kv.get(f"service:{name}:load", "0.5")),
+                "capacity": float(kv.get(f"service:{name}:capacity", "1.0")),
+            }
+        await broadcaster.broadcast("tick", {
+            "tick": engine.tick,
+            "services": services,
+        })
 
     agent_task: asyncio.Task | None = None
 
@@ -158,6 +219,7 @@ async def main() -> None:
         nonlocal agent_task
         while True:
             await engine.step()
+            await broadcast_tick()
             # Run agents concurrently — don't block the tick loop
             if agent_task is None or agent_task.done():
                 agent_task = asyncio.create_task(run_agents())

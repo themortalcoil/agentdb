@@ -27,9 +27,9 @@ class Severity(Enum):
 
 
 EVENT_PROBABILITIES: dict[EventType, float] = {
-    EventType.INFRASTRUCTURE_DECAY: 0.05,
-    EventType.CITIZEN_COMPLAINT: 0.03,
-    EventType.BUDGET_SHORTFALL: 0.02,
+    EventType.INFRASTRUCTURE_DECAY: 0.12,
+    EventType.CITIZEN_COMPLAINT: 0.08,
+    EventType.BUDGET_SHORTFALL: 0.05,
 }
 
 

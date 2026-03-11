@@ -10,6 +10,7 @@
   let paused = false;
   let totalEvents = 0;
   let reconnectTimer = null;
+  var agentTimers = {};
   const RECONNECT_DELAY_MS = 2000;
   const MAX_FEED_ENTRIES = 200;
 
@@ -143,6 +144,12 @@
       energyBar.classList.add("medium");
     }
 
+    // Cancel any pending revert timer for this agent
+    if (agentTimers[agent]) {
+      clearTimeout(agentTimers[agent]);
+      agentTimers[agent] = null;
+    }
+
     // Update status text
     var status = data.status || "idle";
     statusText.textContent = status;
@@ -151,6 +158,16 @@
       statusText.classList.add("active");
     } else if (status === "busy" || status === "repairing") {
       statusText.classList.add("busy");
+    } else if (status === "error") {
+      statusText.classList.add("error");
+    } else if (status === "acted") {
+      statusText.classList.add("active");
+      // Revert to idle after a few seconds
+      agentTimers[agent] = setTimeout(function () {
+        statusText.textContent = "idle";
+        statusText.className = "agent-status-text";
+        agentTimers[agent] = null;
+      }, 8000);
     }
   }
 

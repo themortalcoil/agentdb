@@ -470,6 +470,10 @@ html, body {
   color: var(--status-degraded);
 }
 
+.agent-status-text.error {
+  color: var(--status-failed);
+}
+
 /* ============================================================
    Service Detail Panel
    ============================================================ */
