@@ -107,17 +107,20 @@ async def main() -> None:
 
     engine.on_event(forward_event)
 
+    event_buffer: list = []
+    cycle_counter = 0
+
     # 6. Optional agent swarm (requires Ollama)
     try:
         from agentdb.agents.swarm import build_swarm
-        swarm = build_swarm(fs, kv, overlay)
+        swarm = build_swarm(fs, kv, overlay, event_buffer=event_buffer)
         print("Agent swarm initialized.")
     except Exception as exc:  # noqa: BLE001
         swarm = None
         print(f"Agent swarm unavailable ({exc}); running without agents.")
 
     # 7. FastAPI app
-    app = create_app(broadcaster, engine=engine)
+    app = create_app(broadcaster, engine=engine, fs=fs)
 
     # 8. Background simulation loop
     thread_id = "city-sim"
@@ -126,21 +129,19 @@ async def main() -> None:
     all_agent_names = ["mayor", "engineer", "monitor", "fixer"]
 
     async def run_agents() -> None:
-        """Invoke the agent swarm to observe and act on city state."""
+        nonlocal cycle_counter
         if swarm is None:
             return
 
-        # Broadcast "working" for all agents so the dashboard shows activity
         for name in all_agent_names:
             await broadcaster.broadcast("agent_update", {
-                "agent": name,
-                "status": "working",
+                "agent": name, "status": "working",
                 "message": f"Checking city health (tick {engine.tick})...",
                 "tick": engine.tick,
             })
 
         try:
-            from langchain_core.messages import HumanMessage
+            from langchain_core.messages import HumanMessage, AIMessage
 
             prompt = (
                 f"Tick {engine.tick}. Check city health. "
@@ -152,51 +153,77 @@ async def main() -> None:
                 config={"configurable": {"thread_id": thread_id}},
             )
 
-            # Find all agents that participated in this conversation
-            participated: dict[str, str] = {}
-            for msg in result["messages"]:
-                name = getattr(msg, "name", None)
-                if name and name in all_agent_names and getattr(msg, "content", ""):
-                    participated[name] = msg.content[:200]
+            cycle_counter += 1
 
-            # Broadcast status for each participating agent
+            # --- Extract agent_message events ---
+            participated: dict[str, str] = {}
+            current_agent = "monitor"
+            for msg in result["messages"]:
+                agent_name = getattr(msg, "name", None)
+                if agent_name and agent_name in all_agent_names:
+                    current_agent = agent_name
+
+                if not isinstance(msg, AIMessage):
+                    continue
+                if not agent_name or agent_name not in all_agent_names:
+                    continue
+                if not getattr(msg, "content", ""):
+                    continue
+
+                tools_used = []
+                handoff_to = None
+                for tc in getattr(msg, "tool_calls", []) or []:
+                    tool_name = tc.get("name", "")
+                    if tool_name.startswith("transfer_to_"):
+                        handoff_to = tool_name.replace("transfer_to_", "")
+                    else:
+                        tools_used.append(tool_name)
+
+                await broadcaster.broadcast("agent_message", {
+                    "cycle_id": cycle_counter,
+                    "tick": engine.tick,
+                    "agent": agent_name,
+                    "message": msg.content[:500],
+                    "tools_used": tools_used,
+                    "handoff_to": handoff_to,
+                })
+                participated[agent_name] = msg.content[:200]
+
+            # --- Broadcast buffered file events ---
+            for event in event_buffer:
+                event["tick"] = engine.tick
+                event["agent"] = current_agent
+                await broadcaster.broadcast(event.pop("type"), event)
+            event_buffer.clear()
+
+            # --- Agent status updates ---
             for name, summary in participated.items():
                 await broadcaster.broadcast("agent_update", {
-                    "agent": name,
-                    "status": "acted",
-                    "message": summary,
-                    "tick": engine.tick,
+                    "agent": name, "status": "acted",
+                    "message": summary, "tick": engine.tick,
                 })
-                # Also push into the activity feed
                 await broadcaster.broadcast("city_event", {
-                    "event_type": "agent_action",
-                    "service": name,
+                    "event_type": "agent_action", "service": name,
                     "severity": "low",
                     "message": f"Agent {name}: {summary[:120]}",
                     "tick": engine.tick,
                 })
-
-            # Mark non-participating agents as idle
             for name in all_agent_names:
                 if name not in participated:
                     await broadcaster.broadcast("agent_update", {
-                        "agent": name,
-                        "status": "idle",
-                        "message": "",
-                        "tick": engine.tick,
+                        "agent": name, "status": "idle",
+                        "message": "", "tick": engine.tick,
                     })
 
             print(f"[tick {engine.tick}] Agents: {', '.join(participated.keys()) or 'none'}")
         except Exception as exc:
             print(f"[tick {engine.tick}] Agent error: {exc}")
             traceback.print_exc()
-            # Broadcast error so dashboard reflects the failure
+            event_buffer.clear()
             for name in all_agent_names:
                 await broadcaster.broadcast("agent_update", {
-                    "agent": name,
-                    "status": "error",
-                    "message": str(exc)[:200],
-                    "tick": engine.tick,
+                    "agent": name, "status": "error",
+                    "message": str(exc)[:200], "tick": engine.tick,
                 })
 
     async def broadcast_tick() -> None:
