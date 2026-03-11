@@ -54,6 +54,7 @@ class VirtualFS:
                VALUES (?, 1, ?, ?, ?)""",
             (mode, now, now, now),
         )
+        assert cursor.lastrowid is not None
         return cursor.lastrowid
 
     def _ensure_parents(self, parts: list[str]) -> int:
