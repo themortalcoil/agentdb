@@ -9,6 +9,8 @@ import json
 import os
 import sqlite3
 import textwrap
+import threading
+import traceback
 
 import uvicorn
 
@@ -78,13 +80,14 @@ def seed_kv_state(kv: KVStore) -> None:
 # ---------------------------------------------------------------------------
 async def main() -> None:
     # 1. Database
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     init_db(conn)
 
     # 2. Core layers
-    fs = VirtualFS(conn)
-    kv = KVStore(conn)
+    db_lock = threading.Lock()
+    fs = VirtualFS(conn, lock=db_lock)
+    kv = KVStore(conn, lock=db_lock)
     overlay = OverlayFS(conn, fs)
 
     # 3. Seed city
@@ -117,9 +120,47 @@ async def main() -> None:
     app = create_app(broadcaster, engine=engine)
 
     # 8. Background simulation loop
+    thread_id = "city-sim"
+
+    async def run_agents() -> None:
+        """Invoke the agent swarm to observe and act on city state."""
+        if swarm is None:
+            return
+        try:
+            from langchain_core.messages import HumanMessage
+
+            prompt = (
+                f"Tick {engine.tick}. Check city health. "
+                "If any service is degraded or failed, create an incident "
+                "and hand off to the appropriate agent. Otherwise report status."
+            )
+            result = await swarm.ainvoke(
+                {"messages": [HumanMessage(content=prompt)]},
+                config={"configurable": {"thread_id": thread_id}},
+            )
+            # Broadcast agent activity to dashboard
+            last_msg = result["messages"][-1]
+            agent_name = getattr(last_msg, "name", None) or "swarm"
+            await broadcaster.broadcast("agent_update", {
+                "agent": agent_name,
+                "status": "acted",
+                "message": last_msg.content[:200] if last_msg.content else "",
+                "tick": engine.tick,
+            })
+            print(f"[tick {engine.tick}] Agent '{agent_name}': {last_msg.content[:120]}")
+        except Exception as exc:
+            print(f"[tick {engine.tick}] Agent error: {exc}")
+            traceback.print_exc()
+
+    agent_task: asyncio.Task | None = None
+
     async def simulation_loop() -> None:
+        nonlocal agent_task
         while True:
             await engine.step()
+            # Run agents concurrently — don't block the tick loop
+            if agent_task is None or agent_task.done():
+                agent_task = asyncio.create_task(run_agents())
             await asyncio.sleep(TICK_INTERVAL)
 
     loop_task = asyncio.create_task(simulation_loop())

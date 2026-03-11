@@ -32,7 +32,7 @@ AGENT_CONFIGS: dict[str, AgentConfig] = {
     ),
     "engineer": AgentConfig(
         name="engineer",
-        model="minimax-m2.5:cloud",
+        model="qwen3.5:cloud",
         system_prompt=(
             "You are a City Engineer. You write Python code for city services.\n"
             "Each service has a main.py with a handle_load(load, config) function:\n"
@@ -65,7 +65,7 @@ AGENT_CONFIGS: dict[str, AgentConfig] = {
     ),
     "fixer": AgentConfig(
         name="fixer",
-        model="minimax-m2.5:cloud",
+        model="qwen3.5:cloud",
         system_prompt=(
             "You are the City Fixer. You diagnose and fix broken services.\n\n"
             "Workflow:\n"

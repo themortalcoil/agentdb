@@ -12,7 +12,7 @@ def test_agent_config_structure():
     for name, config in AGENT_CONFIGS.items():
         assert isinstance(config, AgentConfig)
         assert config.name == name
-        assert config.model in ("glm-5:cloud", "minimax-m2.5:cloud")
+        assert config.model in ("glm-5:cloud", "minimax-m2.5:cloud", "qwen3.5:cloud")
         assert len(config.system_prompt) > 0
         assert len(config.tool_names) > 0
         assert len(config.handoff_targets) > 0
@@ -22,8 +22,8 @@ def test_mayor_uses_glm5():
     assert AGENT_CONFIGS["mayor"].model == "glm-5:cloud"
 
 
-def test_engineer_uses_minimax():
-    assert AGENT_CONFIGS["engineer"].model == "minimax-m2.5:cloud"
+def test_engineer_uses_coding_model():
+    assert AGENT_CONFIGS["engineer"].model in ("minimax-m2.5:cloud", "qwen3.5:cloud")
 
 
 def test_build_swarm_returns_graph(db):

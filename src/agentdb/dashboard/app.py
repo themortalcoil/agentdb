@@ -47,7 +47,10 @@ def create_app(broadcaster: Broadcaster, engine=None) -> FastAPI:
 
             while True:
                 message = await queue.get()
-                await ws.send_text(message)
+                try:
+                    await ws.send_text(message)
+                except RuntimeError:
+                    break
         except WebSocketDisconnect:
             pass
         finally:

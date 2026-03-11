@@ -21,9 +21,11 @@ class CityTools:
         self.overlay = overlay
         self._incident_counter = 0
 
-    def _validate_path(self, path: str) -> None:
+    def _validate_path(self, path: str) -> str | None:
+        """Return error string if path is invalid, None if OK."""
         if not path.startswith("/city/"):
-            raise ValueError(f"Path must be under /city/, got: {path}")
+            return f"ERROR: Path must be under /city/, got: {path}"
+        return None
 
     # --- Mayor tools ---
 
@@ -60,13 +62,15 @@ class CityTools:
 
     def write_file(self, path: str, content: str) -> str:
         """Write a file to the city filesystem (production)."""
-        self._validate_path(path)
+        if err := self._validate_path(path):
+            return err
         self.fs.write_file(path, content)
         return f"Written {len(content)} bytes to {path}"
 
     def read_file(self, path: str) -> str:
         """Read a file from the city filesystem."""
-        self._validate_path(path)
+        if err := self._validate_path(path):
+            return err
         content = self.fs.read_file(path)
         if content is None:
             return f"File not found: {path}"
@@ -74,7 +78,8 @@ class CityTools:
 
     def deploy_staging(self, path: str, content: str) -> str:
         """Write a file to the staging overlay."""
-        self._validate_path(path)
+        if err := self._validate_path(path):
+            return err
         self.overlay.write_file(path, content)
         return f"Staged {len(content)} bytes to {path}"
 
@@ -134,7 +139,8 @@ class CityTools:
 
     def patch_file(self, path: str, content: str) -> str:
         """Patch a file in the staging overlay."""
-        self._validate_path(path)
+        if err := self._validate_path(path):
+            return err
         self.overlay.write_file(path, content)
         return f"Patched {path} in staging ({len(content)} bytes)"
 

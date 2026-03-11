@@ -23,8 +23,9 @@ def test_read_city_state(city_tools):
 
 
 def test_write_file_validates_path(city_tools):
-    with pytest.raises(ValueError, match="under /city/"):
-        city_tools.write_file("/etc/passwd", "hack")
+    result = city_tools.write_file("/etc/passwd", "hack")
+    assert "ERROR" in result
+    assert "/city/" in result
 
 
 def test_write_and_read_file(city_tools):
