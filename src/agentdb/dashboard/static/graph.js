@@ -22,21 +22,9 @@
   var NODE_RADIUS = 42;
   var LABEL_OFFSET = 56;
 
-  // ---- Service nodes (diamond layout) ----
-  var services = [
-    { id: "power-grid",       label: "Power Grid",       status: "ok", load: 0.5, capacity: 1.0, x: 0, y: 0 },
-    { id: "water-system",     label: "Water System",     status: "ok", load: 0.5, capacity: 1.0, x: 0, y: 0 },
-    { id: "traffic-control",  label: "Traffic Control",  status: "ok", load: 0.5, capacity: 1.0, x: 0, y: 0 },
-    { id: "comms-network",    label: "Comms Network",    status: "ok", load: 0.5, capacity: 1.0, x: 0, y: 0 }
-  ];
-
-  // Dependencies: from -> [to, ...]
-  var edges = [
-    { from: "power-grid",  to: "water-system" },
-    { from: "power-grid",  to: "traffic-control" },
-    { from: "power-grid",  to: "comms-network" },
-    { from: "comms-network", to: "traffic-control" }
-  ];
+  // ---- Service nodes (populated from /api/topology) ----
+  var services = [];
+  var edges = [];
 
   var selectedService = null;
   var animationPhase = 0;
@@ -48,14 +36,13 @@
   function layoutNodes(w, h) {
     var cx = w / 2;
     var cy = h / 2;
-    var rx = Math.min(w, h) * 0.3;
-    var ry = Math.min(w, h) * 0.32;
+    var r = Math.min(w, h) * 0.3;
 
-    // Diamond: top, right, bottom, left
-    services[0].x = cx;            services[0].y = cy - ry;        // power-grid (top)
-    services[1].x = cx + rx;       services[1].y = cy;             // water-system (right)
-    services[2].x = cx;            services[2].y = cy + ry;        // traffic-control (bottom)
-    services[3].x = cx - rx;       services[3].y = cy;             // comms-network (left)
+    for (var i = 0; i < services.length; i++) {
+      var angle = -Math.PI / 2 + (2 * Math.PI * i) / services.length;
+      services[i].x = cx + r * Math.cos(angle);
+      services[i].y = cy + r * Math.sin(angle);
+    }
   }
 
   function findNode(id) {
@@ -276,8 +263,38 @@
     canvas.addEventListener("click", handleClick);
     window.addEventListener("resize", resize);
 
-    resize();
-    draw();
+    // Fetch topology from API, then start rendering
+    fetch("/api/topology")
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        services = data.services.map(function (id) {
+          return {
+            id: id,
+            label: id.split("-").map(function (w) {
+              return w.charAt(0).toUpperCase() + w.slice(1);
+            }).join(" "),
+            status: "ok",
+            load: 0.5,
+            capacity: data.capacities[id] || 1.0,
+            x: 0,
+            y: 0
+          };
+        });
+
+        // Convert edges dict {child: [parents]} to [{from: parent, to: child}]
+        edges = [];
+        Object.keys(data.edges).forEach(function (child) {
+          data.edges[child].forEach(function (parent) {
+            edges.push({ from: parent, to: child });
+          });
+        });
+
+        resize();
+        draw();
+      })
+      .catch(function (err) {
+        console.error("Failed to load topology:", err);
+      });
   }
 
   // Wait for DOM

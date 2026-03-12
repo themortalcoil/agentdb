@@ -67,6 +67,30 @@ def test_evaluate_syntax_error(db):
     assert result.error is not None
 
 
+INFINITE_LOOP_SERVICE = '''
+def handle_load(load: float, config: dict) -> dict:
+    while True:
+        pass
+'''
+
+
+def test_evaluate_infinite_loop_times_out(db):
+    fs = VirtualFS(db)
+    fs.write_file("/city/services/power-grid/main.py", INFINITE_LOOP_SERVICE)
+    fs.write_file("/city/services/power-grid/config.json", '{}')
+    evaluator = ServiceEvaluator(fs)
+    # Use a shorter timeout for testing
+    import agentdb.simulation.evaluator as ev
+    old_timeout = ev.EVAL_TIMEOUT
+    ev.EVAL_TIMEOUT = 2
+    try:
+        result = evaluator.evaluate("power-grid", load=0.5)
+        assert result.status == "failed"
+        assert "timeout" in result.error.lower()
+    finally:
+        ev.EVAL_TIMEOUT = old_timeout
+
+
 def test_evaluate_missing_service(db):
     fs = VirtualFS(db)
     evaluator = ServiceEvaluator(fs)

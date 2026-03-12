@@ -45,6 +45,11 @@ class SimulationEngine:
     def resume(self) -> None:
         self.paused = False
 
+    def get_full_state(self) -> dict:
+        """Return full simulation state for the dashboard API."""
+        items = self._kv.list_prefix("")
+        return {"state": dict(items), "tick": self.tick, "paused": self.paused}
+
     async def step(self) -> list[CityEvent]:
         """Run one simulation tick. Returns events generated."""
         if self.paused:

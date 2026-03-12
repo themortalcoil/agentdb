@@ -1,5 +1,6 @@
 import json
 import pytest
+from agentdb.db.audit import AuditLog
 from agentdb.db.filesystem import VirtualFS
 from agentdb.db.kvstore import KVStore
 from agentdb.db.overlay import OverlayFS
@@ -67,3 +68,36 @@ def test_create_incident(city_tools):
 def test_set_priority(city_tools):
     city_tools.set_priority("reliability")
     assert city_tools.kv.get("mayor:priority") == "reliability"
+
+
+@pytest.fixture
+def audited_city_tools(db):
+    fs = VirtualFS(db)
+    kv = KVStore(db)
+    overlay = OverlayFS(db, fs)
+    audit = AuditLog(db)
+    return CityTools(fs=fs, kv=kv, overlay=overlay, audit=audit), audit
+
+
+def test_audit_logs_tool_calls(audited_city_tools):
+    tools, audit = audited_city_tools
+    tools.kv.set("city:population", "10000")
+    tools.read_city_state()
+    results = audit.query(name="read_city_state")
+    assert len(results) == 1
+    assert results[0]["name"] == "read_city_state"
+    assert results[0]["duration_ms"] >= 0
+
+
+def test_create_incident_uses_total_created_key(city_tools):
+    city_tools.create_incident(
+        service="power-grid",
+        description="Test incident",
+        severity="high",
+    )
+    # Should use incident:total_created, NOT incident:active_count
+    total = city_tools.kv.get("incident:total_created")
+    assert total == "1"
+    # active_count should not be touched by tools
+    active = city_tools.kv.get("incident:active_count")
+    assert active is None

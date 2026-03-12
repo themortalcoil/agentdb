@@ -1,3 +1,4 @@
+import threading
 import time
 from agentdb.db.audit import AuditLog
 
@@ -52,3 +53,19 @@ def test_context_manager(db):
     assert len(results) == 1
     assert results[0]["name"] == "my_tool"
     assert results[0]["result"] == '"computed"'
+
+
+def test_audit_accepts_lock(db):
+    lock = threading.Lock()
+    audit = AuditLog(db, lock=lock)
+    audit.log("write_file", '{"path": "/city/services/power-grid/main.py"}', '"ok"')
+    results = audit.query()
+    assert len(results) == 1
+
+
+def test_audit_default_lock(db):
+    """AuditLog should work without an explicit lock (creates its own)."""
+    audit = AuditLog(db)
+    audit.log("tool", "{}", '"ok"')
+    results = audit.query()
+    assert len(results) == 1

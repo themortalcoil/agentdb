@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from agentdb.dashboard.broadcast import Broadcaster
+from agentdb.simulation.deps import ServiceGraph
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -33,7 +34,7 @@ def build_fs_tree(fs) -> dict:
     return _walk("/")
 
 
-def create_app(broadcaster: Broadcaster, engine=None, fs=None) -> FastAPI:
+def create_app(broadcaster: Broadcaster, engine=None, fs=None, audit=None) -> FastAPI:
     app = FastAPI(title="AgentDB City Dashboard")
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -98,14 +99,22 @@ def create_app(broadcaster: Broadcaster, engine=None, fs=None) -> FastAPI:
     @app.get("/api/state")
     async def get_state():
         if engine:
-            from agentdb.db.kvstore import KVStore
-            kv = KVStore(engine._conn)
-            items = kv.list_prefix("")
-            return {
-                "state": dict(items),
-                "tick": engine.tick,
-                "paused": engine.paused,
-            }
+            return engine.get_full_state()
         return {"state": {}, "tick": 0, "paused": False}
+
+    @app.get("/api/audit")
+    async def get_audit(name: str | None = Query(None), limit: int = Query(50)):
+        if audit is None:
+            return JSONResponse([])
+        return JSONResponse(audit.query(name=name, limit=limit))
+
+    @app.get("/api/topology")
+    async def get_topology():
+        g = ServiceGraph.default_city()
+        return {
+            "services": g.services,
+            "edges": g.edges,
+            "capacities": g.capacities,
+        }
 
     return app

@@ -1,6 +1,9 @@
 """Tool call audit trail backed by AgentFS tool_calls table."""
 
+from __future__ import annotations
+
 import sqlite3
+import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -14,8 +17,9 @@ class ToolCallTracker:
 
 
 class AuditLog:
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: sqlite3.Connection, lock: threading.Lock | None = None):
         self._conn = conn
+        self._lock = lock or threading.Lock()
 
     def log(
         self,
@@ -26,13 +30,14 @@ class AuditLog:
         agent_name: str | None = None,
     ) -> int | None:
         now_ms = int(time.time() * 1000)
-        cursor = self._conn.execute(
-            """INSERT INTO tool_calls
-               (agent_name, name, parameters, result, error, started_at, completed_at, duration_ms)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (agent_name, name, parameters, result, error, now_ms, now_ms, 0),
-        )
-        self._conn.commit()
+        with self._lock:
+            cursor = self._conn.execute(
+                """INSERT INTO tool_calls
+                   (agent_name, name, parameters, result, error, started_at, completed_at, duration_ms)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (agent_name, name, parameters, result, error, now_ms, now_ms, 0),
+            )
+            self._conn.commit()
         return cursor.lastrowid
 
     @contextmanager
@@ -46,14 +51,15 @@ class AuditLog:
             raise
         finally:
             completed = int(time.time() * 1000)
-            self._conn.execute(
-                """INSERT INTO tool_calls
-                   (agent_name, name, parameters, result, error, started_at, completed_at, duration_ms)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (None, name, parameters, tracker.result, tracker.error,
-                 started, completed, completed - started),
-            )
-            self._conn.commit()
+            with self._lock:
+                self._conn.execute(
+                    """INSERT INTO tool_calls
+                       (agent_name, name, parameters, result, error, started_at, completed_at, duration_ms)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (None, name, parameters, tracker.result, tracker.error,
+                     started, completed, completed - started),
+                )
+                self._conn.commit()
 
     def query(
         self,
@@ -67,5 +73,6 @@ class AuditLog:
             params.append(name)
         sql += " ORDER BY id DESC LIMIT ?"
         params.append(limit)
-        rows = self._conn.execute(sql, params).fetchall()
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
         return [dict(row) for row in rows]

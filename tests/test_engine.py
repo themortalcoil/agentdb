@@ -62,6 +62,17 @@ async def test_pause_resume(db):
     assert engine.tick == 1
 
 
+async def test_get_full_state(db):
+    fs, kv = _setup_city(db)
+    engine = SimulationEngine(db, fs, kv, seed=42)
+    await engine.step()
+    state = engine.get_full_state()
+    assert "state" in state
+    assert "tick" in state
+    assert state["tick"] == 1
+    assert "city:population" in state["state"]
+
+
 async def test_broken_service_generates_failure_event(db):
     fs, kv = _setup_city(db)
     fs.write_file(

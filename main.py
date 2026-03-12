@@ -10,15 +10,18 @@ import os
 import sqlite3
 import textwrap
 import threading
-import traceback
 
 import uvicorn
 
 from agentdb.db.schema import init_db
+from agentdb.db.audit import AuditLog
 from agentdb.db.filesystem import VirtualFS
 from agentdb.db.kvstore import KVStore
 from agentdb.db.overlay import OverlayFS
 from agentdb.simulation.engine import SimulationEngine
+from agentdb.simulation.deps import ServiceGraph
+from agentdb.agents.definitions import AGENT_CONFIGS
+from agentdb.agents.runner import AgentRunner
 from agentdb.dashboard.broadcast import Broadcaster
 from agentdb.dashboard.app import create_app
 
@@ -45,31 +48,24 @@ SERVICE_CODE = textwrap.dedent("""\
         }
 """)
 
-SERVICE_CONFIGS: dict[str, dict] = {
-    "power-grid": {"capacity": 1.0},
-    "water-system": {"capacity": 0.8},
-    "traffic-control": {"capacity": 0.6},
-    "comms-network": {"capacity": 0.9},
-}
-
-
 # ---------------------------------------------------------------------------
 # Seeding helpers
 # ---------------------------------------------------------------------------
-def seed_services(fs: VirtualFS) -> None:
+def seed_services(fs: VirtualFS, graph: ServiceGraph) -> None:
     """Write default handle_load code and config.json for each service."""
-    for name, config in SERVICE_CONFIGS.items():
+    for name in graph.services:
+        capacity = graph.capacities.get(name, 1.0)
         fs.write_file(f"/city/services/{name}/main.py", SERVICE_CODE)
-        fs.write_file(f"/city/services/{name}/config.json", json.dumps(config))
+        fs.write_file(f"/city/services/{name}/config.json", json.dumps({"capacity": capacity}))
 
 
-def seed_kv_state(kv: KVStore) -> None:
+def seed_kv_state(kv: KVStore, graph: ServiceGraph) -> None:
     """Populate initial KV entries for city state."""
     initial: dict[str, str] = {
         "city:population": "10000",
         "city:budget": "100000",
     }
-    for name in SERVICE_CONFIGS:
+    for name in graph.services:
         initial[f"service:{name}:status"] = "ok"
         initial[f"service:{name}:load"] = "0.5"
     kv.set_many(initial)
@@ -90,14 +86,17 @@ async def main() -> None:
     kv = KVStore(conn, lock=db_lock)
     overlay = OverlayFS(conn, fs)
 
-    # 3. Seed city
-    seed_services(fs)
-    seed_kv_state(kv)
+    # 3. Service graph (single source of truth)
+    graph = ServiceGraph.default_city()
 
-    # 4. Simulation engine
-    engine = SimulationEngine(conn, fs, kv, seed=42)
+    # 4. Seed city
+    seed_services(fs, graph)
+    seed_kv_state(kv, graph)
 
-    # 5. Broadcaster + event wiring
+    # 5. Simulation engine
+    engine = SimulationEngine(conn, fs, kv, seed=42, graph=graph)
+
+    # 6. Broadcaster + event wiring
     broadcaster = Broadcaster()
 
     def forward_event(event):
@@ -107,131 +106,36 @@ async def main() -> None:
 
     engine.on_event(forward_event)
 
+    # 7. AuditLog + agent swarm (requires Ollama)
+    audit = AuditLog(conn, lock=db_lock)
     event_buffer: list = []
-    cycle_counter = 0
 
-    # 6. Optional agent swarm (requires Ollama)
     try:
         from agentdb.agents.swarm import build_swarm
-        swarm = build_swarm(fs, kv, overlay, event_buffer=event_buffer)
+        swarm = build_swarm(fs, kv, overlay, event_buffer=event_buffer, audit=audit)
         print("Agent swarm initialized.")
     except Exception as exc:  # noqa: BLE001
         swarm = None
         print(f"Agent swarm unavailable ({exc}); running without agents.")
 
-    # 7. FastAPI app
-    app = create_app(broadcaster, engine=engine, fs=fs)
+    # 8. Agent runner
+    all_agent_names = list(AGENT_CONFIGS.keys())
+    runner = AgentRunner(
+        swarm=swarm,
+        broadcaster=broadcaster,
+        engine=engine,
+        event_buffer=event_buffer,
+        agent_names=all_agent_names,
+    )
 
-    # 8. Background simulation loop
-    thread_id = "city-sim"
+    # 9. FastAPI app
+    app = create_app(broadcaster, engine=engine, fs=fs, audit=audit)
 
-    all_agent_names = list(SERVICE_CONFIGS.keys())  # not agents, but we want the 4 agent names
-    all_agent_names = ["mayor", "engineer", "monitor", "fixer"]
-
-    async def run_agents() -> None:
-        nonlocal cycle_counter
-        if swarm is None:
-            return
-
-        for name in all_agent_names:
-            await broadcaster.broadcast("agent_update", {
-                "agent": name, "status": "working",
-                "message": f"Checking city health (tick {engine.tick})...",
-                "tick": engine.tick,
-            })
-
-        try:
-            from langchain_core.messages import HumanMessage, AIMessage
-
-            prompt = (
-                f"Tick {engine.tick}. Check city health. "
-                "If any service is degraded or failed, create an incident "
-                "and hand off to the appropriate agent. Otherwise report status."
-            )
-            result = await swarm.ainvoke(
-                {"messages": [HumanMessage(content=prompt)]},
-                config={"configurable": {"thread_id": thread_id}},
-            )
-
-            cycle_counter += 1
-
-            # --- Extract agent_message events ---
-            participated: dict[str, str] = {}
-            current_agent = "monitor"
-            for msg in result["messages"]:
-                agent_name = getattr(msg, "name", None)
-                if agent_name and agent_name in all_agent_names:
-                    current_agent = agent_name
-
-                if not isinstance(msg, AIMessage):
-                    continue
-                if not agent_name or agent_name not in all_agent_names:
-                    continue
-                if not getattr(msg, "content", ""):
-                    continue
-
-                tools_used = []
-                handoff_to = None
-                for tc in getattr(msg, "tool_calls", []) or []:
-                    tool_name = tc.get("name", "")
-                    if tool_name.startswith("transfer_to_"):
-                        handoff_to = tool_name.replace("transfer_to_", "")
-                    else:
-                        tools_used.append(tool_name)
-
-                await broadcaster.broadcast("agent_message", {
-                    "cycle_id": cycle_counter,
-                    "tick": engine.tick,
-                    "agent": agent_name,
-                    "message": msg.content[:500],
-                    "tools_used": tools_used,
-                    "handoff_to": handoff_to,
-                })
-                participated[agent_name] = msg.content[:200]
-
-            # --- Broadcast buffered file events ---
-            for event in event_buffer:
-                etype = event["type"]
-                payload = {k: v for k, v in event.items() if k != "type"}
-                payload["tick"] = engine.tick
-                payload["agent"] = current_agent
-                await broadcaster.broadcast(etype, payload)
-            event_buffer.clear()
-
-            # --- Agent status updates ---
-            for name, summary in participated.items():
-                await broadcaster.broadcast("agent_update", {
-                    "agent": name, "status": "acted",
-                    "message": summary, "tick": engine.tick,
-                })
-                await broadcaster.broadcast("city_event", {
-                    "event_type": "agent_action", "service": name,
-                    "severity": "low",
-                    "message": f"Agent {name}: {summary[:120]}",
-                    "tick": engine.tick,
-                })
-            for name in all_agent_names:
-                if name not in participated:
-                    await broadcaster.broadcast("agent_update", {
-                        "agent": name, "status": "idle",
-                        "message": "", "tick": engine.tick,
-                    })
-
-            print(f"[tick {engine.tick}] Agents: {', '.join(participated.keys()) or 'none'}")
-        except Exception as exc:
-            print(f"[tick {engine.tick}] Agent error: {exc}")
-            traceback.print_exc()
-            event_buffer.clear()
-            for name in all_agent_names:
-                await broadcaster.broadcast("agent_update", {
-                    "agent": name, "status": "error",
-                    "message": str(exc)[:200], "tick": engine.tick,
-                })
-
+    # 10. Background simulation loop
     async def broadcast_tick() -> None:
         """Broadcast current tick + service states to all dashboard clients."""
         services = {}
-        for name in SERVICE_CONFIGS:
+        for name in graph.services:
             services[name] = {
                 "status": kv.get(f"service:{name}:status", "ok"),
                 "load": float(kv.get(f"service:{name}:load", "0.5")),
@@ -251,12 +155,12 @@ async def main() -> None:
             await broadcast_tick()
             # Run agents concurrently — don't block the tick loop
             if agent_task is None or agent_task.done():
-                agent_task = asyncio.create_task(run_agents())
+                agent_task = asyncio.create_task(runner.run_cycle())
             await asyncio.sleep(TICK_INTERVAL)
 
     loop_task = asyncio.create_task(simulation_loop())
 
-    # 9. Start uvicorn
+    # 11. Start uvicorn
     config = uvicorn.Config(app, host="0.0.0.0", port=8000, log_level="info")
     server = uvicorn.Server(config)
     try:

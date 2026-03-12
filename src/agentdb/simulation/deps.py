@@ -12,6 +12,7 @@ class ServiceGraph:
 
     services: list[str] = field(default_factory=list)
     edges: dict[str, list[str]] = field(default_factory=dict)
+    capacities: dict[str, float] = field(default_factory=dict)
 
     @classmethod
     def default_city(cls) -> "ServiceGraph":
@@ -24,7 +25,13 @@ class ServiceGraph:
             "comms-network": ["power-grid"],
             "traffic-control": ["comms-network"],
         }
-        return cls(services=services, edges=edges)
+        capacities = {
+            "power-grid": 1.0,
+            "water-system": 0.8,
+            "traffic-control": 0.6,
+            "comms-network": 0.9,
+        }
+        return cls(services=services, edges=edges, capacities=capacities)
 
     def get_dependencies(self, service: str) -> list[str]:
         return list(self.edges.get(service, []))

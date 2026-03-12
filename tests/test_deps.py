@@ -35,3 +35,13 @@ def test_dependencies_of():
     g = ServiceGraph.default_city()
     deps = g.get_dependencies("traffic-control")
     assert "comms-network" in deps
+
+
+def test_default_city_capacities():
+    g = ServiceGraph.default_city()
+    assert g.capacities == {
+        "power-grid": 1.0,
+        "water-system": 0.8,
+        "traffic-control": 0.6,
+        "comms-network": 0.9,
+    }
