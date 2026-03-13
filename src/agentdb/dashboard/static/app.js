@@ -101,6 +101,9 @@
         break;
       case "agent_message":
         window.dispatchEvent(new CustomEvent("agentdb:agent-message", { detail: msg.data }));
+        if (msg.data.service && typeof window.updateAgentPresence === "function") {
+          window.updateAgentPresence(msg.data.agent, msg.data.service);
+        }
         break;
       case "code_diff":
         window.dispatchEvent(new CustomEvent("agentdb:code-diff", { detail: msg.data }));
@@ -186,6 +189,10 @@
         statusText.className = "agent-status-text";
         agentTimers[agent] = null;
       }, 8000);
+    }
+
+    if (status === "idle" && typeof window.updateAgentPresence === "function") {
+      window.updateAgentPresence(agent, null);
     }
   }
 

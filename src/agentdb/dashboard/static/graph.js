@@ -365,6 +365,31 @@
     }
   };
 
+  var AGENT_COLORS = {
+    mayor: "#81a2be",
+    engineer: "#b294bb",
+    monitor: "#b5bd68",
+    fixer: "#f0c674"
+  };
+
+  window.updateAgentPresence = function (agentName, serviceId) {
+    for (var i = 0; i < services.length; i++) {
+      services[i].agentDots = services[i].agentDots.filter(function (d) {
+        return d.agent !== agentName;
+      });
+    }
+    if (serviceId) {
+      var node = findNode(serviceId);
+      if (node) {
+        node.agentDots.push({
+          agent: agentName,
+          color: AGENT_COLORS[agentName] || "#8c8f93",
+          startTime: performance.now()
+        });
+      }
+    }
+  };
+
   window.triggerCascadeEdge = function (sourceId, targetId) {
     for (var i = 0; i < edges.length; i++) {
       if (edges[i].from === sourceId && edges[i].to === targetId) {
