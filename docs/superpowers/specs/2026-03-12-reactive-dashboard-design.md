@@ -132,7 +132,7 @@ Replaces chip bar with a full timeline panel:
 | File | Changes |
 |------|---------|
 | `graph.js` | Node transition states (pulse/shake/glow), edge cascade animation, agent presence dots, node click emits `agentdb:service-selected` event |
-| `app.js` | Unified `recentActivity[]` array, merge 3 message types into it, render chip bar, wire chip click → graph highlight |
+| `app.js` | Unified `recentActivity[]` array, merge 4 message types into it, render chip bar, wire chip click → graph highlight |
 | `style.css` | Chip bar styles, chip anatomy, hover tooltip, active/filtered states |
 | `index.html` | Chip bar container div below the Canvas |
 | `detail-tabs.js` | Listen for chip clicks that target diffs → switch to diffs tab and scroll to entry |
