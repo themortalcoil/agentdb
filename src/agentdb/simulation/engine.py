@@ -109,6 +109,7 @@ class SimulationEngine:
                         severity=Severity.CRITICAL,
                         message=f"{affected} affected by {failed} failure",
                         tick=self.tick,
+                        source=failed,
                     )
                     all_events.append(event)
 

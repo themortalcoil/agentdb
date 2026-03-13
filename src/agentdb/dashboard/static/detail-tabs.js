@@ -53,6 +53,10 @@ document.addEventListener("alpine:init", function () {
         window.addEventListener("agentdb:fs-change", function (e) {
           self.applyFsChange(e.detail);
         });
+
+        window.addEventListener("agentdb:chip-open-diff", function () {
+          self.tab = "diffs";
+        });
       },
 
       // --- Tab switching ---

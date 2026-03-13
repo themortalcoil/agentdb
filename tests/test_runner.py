@@ -45,3 +45,22 @@ async def test_runner_cycle_counter_starts_at_zero(mock_broadcaster, mock_engine
         agent_names=["monitor"],
     )
     assert runner._cycle_counter == 0
+
+
+async def test_extract_service_from_tool_calls():
+    """AgentRunner._extract_service should find service names in tool args."""
+    from agentdb.agents.runner import AgentRunner
+    # Test path-based extraction
+    assert AgentRunner._extract_service([
+        {"name": "read_file", "args": {"path": "/city/services/power-grid/main.py"}}
+    ]) == "power-grid"
+    # Test direct service argument
+    assert AgentRunner._extract_service([
+        {"name": "create_incident", "args": {"service": "water-system", "description": "down"}}
+    ]) == "water-system"
+    # Test no service extractable
+    assert AgentRunner._extract_service([
+        {"name": "read_city_state", "args": {}}
+    ]) is None
+    # Test empty tool calls
+    assert AgentRunner._extract_service([]) is None

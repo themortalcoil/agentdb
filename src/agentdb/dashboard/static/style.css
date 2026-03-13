@@ -298,6 +298,133 @@ html, body {
 }
 
 /* ============================================================
+   Chip Bar
+   ============================================================ */
+
+.chip-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-subtle);
+  min-height: 32px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.chip-bar-filter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9px;
+  color: var(--accent);
+  background: var(--bg-primary);
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--accent-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.chip-filter-clear {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.chip-filter-clear:hover {
+  color: var(--text-primary);
+}
+
+.chip-bar-chips {
+  display: flex;
+  gap: 4px;
+  overflow-x: hidden;
+  flex: 1;
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--severity-low);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.15s ease;
+  animation: chipSlideIn 0.2s ease-out;
+  position: relative;
+}
+
+@keyframes chipSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.chip:hover {
+  background: var(--border);
+}
+
+.chip-icon {
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.chip-text {
+  font-size: 10px;
+  color: var(--text-primary);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chip-time {
+  font-size: 9px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.chip[data-severity="medium"] { border-left-color: var(--severity-medium); }
+.chip[data-severity="high"]   { border-left-color: var(--severity-high); }
+.chip[data-severity="critical"] { border-left-color: var(--severity-critical); }
+
+.chip .chip-tooltip {
+  display: none;
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: 10px;
+  color: var(--text-primary);
+  white-space: normal;
+  max-width: 300px;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+.chip:hover .chip-tooltip {
+  display: block;
+}
+
+/* ============================================================
    Activity Feed
    ============================================================ */
 

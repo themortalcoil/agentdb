@@ -13,6 +13,29 @@
   var agentTimers = {};
   const RECONNECT_DELAY_MS = 2000;
   const MAX_FEED_ENTRIES = 200;
+  var recentActivity = [];
+  var activityIdCounter = 0;
+  var MAX_ACTIVITY = 50;
+  var chipFilter = null;
+
+  function pushActivity(type, service, agent, summary, severity, tick, detail) {
+    activityIdCounter++;
+    recentActivity.unshift({
+      id: "act-" + activityIdCounter,
+      type: type,
+      service: service || null,
+      agent: agent || null,
+      summary: summary,
+      severity: severity || "low",
+      tick: tick,
+      timestamp: Date.now(),
+      detail: detail
+    });
+    if (recentActivity.length > MAX_ACTIVITY) {
+      recentActivity.pop();
+    }
+    renderChipBar();
+  }
 
   // ---- DOM refs ----
   const tickCounter      = document.getElementById("tickCounter");
@@ -90,18 +113,53 @@
         break;
       case "city_event":
         handleCityEvent(msg.data);
+        if (msg.data.event_type === "cascade_failure" && msg.data.source) {
+          if (typeof window.triggerCascadeEdge === "function") {
+            window.triggerCascadeEdge(msg.data.source, msg.data.service);
+          }
+        }
         break;
       case "agent_update":
         handleAgentUpdate(msg.data);
         break;
       case "agent_message":
         window.dispatchEvent(new CustomEvent("agentdb:agent-message", { detail: msg.data }));
+        if (msg.data.service && typeof window.updateAgentPresence === "function") {
+          window.updateAgentPresence(msg.data.agent, msg.data.service);
+        }
+        pushActivity(
+          "agent_action", msg.data.service || null, msg.data.agent,
+          (msg.data.agent || "agent") + ": " + (msg.data.message || "").slice(0, 60),
+          "low", msg.data.tick || 0, msg.data
+        );
         break;
       case "code_diff":
         window.dispatchEvent(new CustomEvent("agentdb:code-diff", { detail: msg.data }));
+        var codePath = msg.data.path || "";
+        var codeService = null;
+        if (codePath.startsWith("/city/services/")) {
+          var codeParts = codePath.split("/");
+          if (codeParts.length >= 4) codeService = codeParts[3];
+        }
+        pushActivity(
+          "code_change", codeService, msg.data.agent || null,
+          (msg.data.action || "changed") + " " + codePath.split("/").pop(),
+          "low", msg.data.tick || 0, msg.data
+        );
         break;
       case "fs_change":
         window.dispatchEvent(new CustomEvent("agentdb:fs-change", { detail: msg.data }));
+        var fsPath = msg.data.path || "";
+        var fsService = null;
+        if (fsPath.startsWith("/city/services/")) {
+          var fsParts = fsPath.split("/");
+          if (fsParts.length >= 4) fsService = fsParts[3];
+        }
+        pushActivity(
+          "fs_change", fsService, null,
+          msg.data.action + " " + fsPath.split("/").pop(),
+          "low", msg.data.tick || 0, msg.data
+        );
         break;
       case "fs_snapshot":
         window.__agentdb_fs_snapshot = msg.data;
@@ -137,6 +195,11 @@
     totalEvents++;
     eventCount.textContent = totalEvents + " event" + (totalEvents !== 1 ? "s" : "");
     addFeedEntry(data);
+    pushActivity(
+      "event", data.service, null,
+      data.message || data.event_type,
+      data.severity || "low", data.tick || 0, data
+    );
   }
 
   function handleAgentUpdate(data) {
@@ -181,6 +244,10 @@
         statusText.className = "agent-status-text";
         agentTimers[agent] = null;
       }, 8000);
+    }
+
+    if (status === "idle" && typeof window.updateAgentPresence === "function") {
+      window.updateAgentPresence(agent, null);
     }
   }
 
@@ -256,6 +323,113 @@
     empty.textContent = "Waiting for events...";
     activityFeed.appendChild(empty);
   };
+
+  var MAX_VISIBLE_CHIPS = 12;
+
+  var CHIP_ICONS = {
+    event: "\u26A1",
+    agent_action: "\uD83E\uDD16",
+    code_change: "\uD83D\uDCDD",
+    fs_change: "\uD83D\uDCC2"
+  };
+
+  function relativeTime(ts) {
+    var diff = Math.floor((Date.now() - ts) / 1000);
+    if (diff < 60) return diff + "s ago";
+    if (diff < 3600) return Math.floor(diff / 60) + "m ago";
+    return Math.floor(diff / 3600) + "h ago";
+  }
+
+  function renderChipBar() {
+    var container = document.getElementById("chipBarChips");
+    if (!container) return;
+
+    var items = chipFilter
+      ? recentActivity.filter(function (a) { return a.service === chipFilter; })
+      : recentActivity;
+
+    var visible = items.slice(0, MAX_VISIBLE_CHIPS);
+
+    while (container.firstChild) {
+      container.removeChild(container.firstChild);
+    }
+
+    for (var i = 0; i < visible.length; i++) {
+      var item = visible[i];
+      var chip = document.createElement("div");
+      chip.className = "chip";
+      chip.setAttribute("data-severity", item.severity);
+      chip.setAttribute("data-activity-id", item.id);
+
+      var icon = document.createElement("span");
+      icon.className = "chip-icon";
+      icon.textContent = CHIP_ICONS[item.type] || "\u2022";
+
+      var text = document.createElement("span");
+      text.className = "chip-text";
+      text.textContent = item.summary.slice(0, 40);
+
+      var time = document.createElement("span");
+      time.className = "chip-time";
+      time.textContent = relativeTime(item.timestamp);
+
+      var tooltip = document.createElement("div");
+      tooltip.className = "chip-tooltip";
+      tooltip.textContent = item.summary;
+
+      chip.appendChild(icon);
+      chip.appendChild(text);
+      chip.appendChild(time);
+      chip.appendChild(tooltip);
+
+      // Click: highlight node (source:"chip" so filter listener ignores it) + open diff
+      (function (actItem) {
+        chip.addEventListener("click", function () {
+          if (actItem.service && typeof window.updateServiceNode === "function") {
+            window.dispatchEvent(new CustomEvent("agentdb:service-selected", {
+              detail: { service: actItem.service, label: actItem.service, source: "chip" }
+            }));
+          }
+          if (actItem.type === "code_change" && actItem.detail) {
+            window.dispatchEvent(new CustomEvent("agentdb:code-diff", { detail: actItem.detail }));
+            window.dispatchEvent(new CustomEvent("agentdb:chip-open-diff", { detail: actItem.detail }));
+          }
+        });
+      })(item);
+
+      container.appendChild(chip);
+    }
+  }
+
+  // Listen for service selection to filter chips (only from graph clicks, not chip clicks)
+  window.addEventListener("agentdb:service-selected", function (e) {
+    if (e.detail.source === "chip") return;
+
+    var filterEl = document.getElementById("chipFilter");
+    var filterLabel = document.getElementById("chipFilterLabel");
+
+    if (e.detail.service && e.detail.service !== chipFilter) {
+      chipFilter = e.detail.service;
+      if (filterEl) filterEl.style.display = "flex";
+      if (filterLabel) filterLabel.textContent = "Showing: " + e.detail.service;
+    } else {
+      chipFilter = null;
+      if (filterEl) filterEl.style.display = "none";
+    }
+    renderChipBar();
+  });
+
+  var clearBtn = document.getElementById("chipFilterClear");
+  if (clearBtn) {
+    clearBtn.addEventListener("click", function (evt) {
+      evt.stopPropagation();
+      chipFilter = null;
+      document.getElementById("chipFilter").style.display = "none";
+      renderChipBar();
+    });
+  }
+
+  setInterval(renderChipBar, 10000);
 
   // ---- Init ----
   connect();

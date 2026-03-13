@@ -88,3 +88,28 @@ async def test_broken_service_generates_failure_event(db):
     ]
     assert len(failure_events) >= 1
     assert any(e.service == "power-grid" for e in failure_events)
+
+
+async def test_cascade_event_has_source_field(db):
+    """Cascade events must include a structured 'source' field."""
+    fs, kv = _setup_city(db)
+    # Break power-grid so it fails and cascades
+    fs.write_file(
+        "/city/services/power-grid/main.py",
+        "def handle_load(l, c): return 1/0",
+    )
+    events_received = []
+    engine = SimulationEngine(db, fs, kv, seed=42)
+    engine.on_event(lambda e: events_received.append(e))
+    await engine.step()
+    cascade_events = [
+        e for e in events_received if e.event_type.value == "cascade_failure"
+    ]
+    # power-grid has dependents, so at least one cascade should fire
+    assert len(cascade_events) >= 1, "Expected at least one cascade event"
+    for e in cascade_events:
+        assert hasattr(e, "source"), "CityEvent missing 'source' field"
+        assert e.source == "power-grid"
+        d = e.to_dict()
+        assert "source" in d
+        assert d["source"] == "power-grid"
