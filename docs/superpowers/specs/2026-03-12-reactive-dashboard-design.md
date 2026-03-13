@@ -27,15 +27,23 @@ When a cascade event fires, the edge from failed service to affected service lig
 
 Multiple cascades chain visually — the pulse ripples outward through the dependency graph.
 
+**Backend change required:** The `cascade_failure` event payload currently embeds the source service only in the free-text `message` field. Add a structured `source` field to `CityEvent` in `engine.py` so the frontend can identify the exact edge to animate without parsing text.
+
 ### Agent Presence
 
-Each agent gets a small colored indicator (8px circle) positioned around the node they're currently acting on (derived from `agent_message` events with tool calls targeting that service).
+Each agent gets a small colored indicator (8px circle) positioned around the node they're currently acting on.
 
 When an agent hands off, the dot slides from one node to another (lerp over 0.3s).
 
+**Agent-to-service mapping:** The `agent_message` payload currently lacks a `service` field. Add a `service` field to `agent_message` broadcasts in `runner.py` by extracting the service name from tool call arguments (tool calls like `read_file("/city/services/power-grid/main.py")` or `create_incident("power-grid", ...)` contain the service name as the first path segment or argument). When no service can be extracted, `service` is `null` and no presence dot is shown.
+
 ### Implementation
 
-All changes in `graph.js`. Extend the existing render loop with a transition state per node/edge. No new files needed. WebSocket messages already carry the required data: `tick` has status, `city_event` has cascades, `agent_message` has service context.
+Primary changes in `graph.js`. Extend the existing render loop with a transition state per node/edge (e.g., `shakeStartTime`, `glowStartTime`, `cascadePulse` per node/edge). The shake animation uses a damped sine function in the render loop since CSS animations don't apply to Canvas-drawn elements.
+
+**Integration pattern:** `app.js` dispatches custom DOM events (`agentdb:cascade`, `agentdb:agent-presence`) based on WebSocket messages. `graph.js` listens for these events inside its IIFE (same pattern as `detail-tabs.js`). `graph.js` dispatches `agentdb:service-selected` on node click for other components to consume.
+
+**Small backend changes required** (see Sections 1 details): add `source` field to cascade events in `engine.py`, add `service` field to agent messages in `runner.py`.
 
 ---
 
@@ -47,7 +55,7 @@ A lightweight bridge between the graph and detailed information. Shows recent ac
 
 ### Layout
 
-Horizontal strip below the Canvas, max 8 chips visible, newest on the right. Overflow scrolls left (older chips slide out). When nothing is happening, the bar is a thin quiet line.
+Horizontal strip below the Canvas, max 12 chips visible, newest on the left (reading order). Overflow scrolls right (older chips slide out). When nothing is happening, the bar is a thin quiet line.
 
 ### Chip Anatomy
 
@@ -61,12 +69,13 @@ Horizontal strip below the Canvas, max 8 chips visible, newest on the right. Ove
 - `city_event` → "power-grid failed" / "cascade hit water-system"
 - `agent_message` with tool calls → "monitor created incident INC-12" / "fixer patched main.py"
 - `code_diff` → "engineer wrote traffic-control/main.py"
+- `fs_change` → "file written: power-grid/config.json"
 
 ### Interactions
 
 - **Hover chip** → tooltip with full message text
 - **Click chip** → highlights the relevant service node on the graph (glow). If it's a code diff, also opens the diff in the detail panel below.
-- **Click service node** → filters chips to only that service (toggle behavior, click again to unfilter)
+- **Click service node** → filters chips to only that service (toggle behavior, click again to unfilter). When filtered, a small label appears at the left of the chip bar: "Showing: power-grid ✕" — clicking ✕ clears the filter.
 
 ### Data Model
 
@@ -87,7 +96,7 @@ Defines the interface between phase 1 and phase 2 so the event chip bar evolves 
   service: string | null,
   agent: string | null,
   summary: string,
-  severity: "info" | "medium" | "high" | "critical",
+  severity: "low" | "medium" | "high" | "critical",
   tick: number,
   timestamp: number,
   detail: object       // raw payload for expansion
@@ -127,11 +136,18 @@ Replaces chip bar with a full timeline panel:
 | `style.css` | Chip bar styles, chip anatomy, hover tooltip, active/filtered states |
 | `index.html` | Chip bar container div below the Canvas |
 | `detail-tabs.js` | Listen for chip clicks that target diffs → switch to diffs tab and scroll to entry |
+| `engine.py` | Add `source` field to `CityEvent` dataclass; populate on cascade events |
+| `runner.py` | Extract service name from tool call args; add `service` field to `agent_message` broadcasts |
+
+### Small Backend Changes
+
+- `engine.py` — add `source` field to `CityEvent` for cascade events (one-line addition to the dataclass + one-line in the cascade loop)
+- `runner.py` — add `service` field to `agent_message` broadcasts by extracting service name from tool call arguments
 
 ### What Does NOT Change
 
-- `app.py` / `broadcast.py` — no backend changes, all data already available via existing WebSocket messages
-- `engine.py` / `runner.py` — no simulation or agent changes
+- `app.py` / `broadcast.py` — no changes to API endpoints or WebSocket handler
+- Simulation logic, agent prompts, and tool behavior unchanged
 - Existing tab panel stays as-is (chip bar is additive, not a replacement yet)
 
 ### Testing Approach
