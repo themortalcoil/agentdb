@@ -28,6 +28,22 @@ class AgentRunner:
         self._thread_id = thread_id
         self._cycle_counter = 0
 
+    @staticmethod
+    def _extract_service(tool_calls: list[dict]) -> str | None:
+        """Extract the target service name from tool call arguments."""
+        for tc in tool_calls:
+            args = tc.get("args", {})
+            # Check direct 'service' argument
+            if "service" in args:
+                return args["service"]
+            # Check path argument for /city/services/<name>/...
+            path = args.get("path", "")
+            if path.startswith("/city/services/"):
+                parts = path.split("/")
+                if len(parts) >= 4:
+                    return parts[3]
+        return None
+
     async def run_cycle(self) -> None:
         """Run one agent decision cycle. Broadcasts status before/during/after."""
         for name in self._agent_names:
@@ -82,6 +98,7 @@ class AgentRunner:
                 continue
 
             tools_used = []
+            raw_tool_calls = []
             handoff_to = None
             for tc in getattr(msg, "tool_calls", []) or []:
                 tool_name = tc.get("name", "")
@@ -89,6 +106,9 @@ class AgentRunner:
                     handoff_to = tool_name.replace("transfer_to_", "")
                 else:
                     tools_used.append(tool_name)
+                    raw_tool_calls.append(tc)
+
+            service = self._extract_service(raw_tool_calls)
 
             await self._broadcaster.broadcast("agent_message", {
                 "cycle_id": self._cycle_counter,
@@ -97,6 +117,7 @@ class AgentRunner:
                 "message": msg.content[:500],
                 "tools_used": tools_used,
                 "handoff_to": handoff_to,
+                "service": service,
             })
             participated[agent_name] = msg.content[:200]
 
