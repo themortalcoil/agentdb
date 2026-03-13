@@ -13,6 +13,29 @@
   var agentTimers = {};
   const RECONNECT_DELAY_MS = 2000;
   const MAX_FEED_ENTRIES = 200;
+  var recentActivity = [];
+  var activityIdCounter = 0;
+  var MAX_ACTIVITY = 50;
+  var chipFilter = null;
+
+  function pushActivity(type, service, agent, summary, severity, tick, detail) {
+    activityIdCounter++;
+    recentActivity.unshift({
+      id: "act-" + activityIdCounter,
+      type: type,
+      service: service || null,
+      agent: agent || null,
+      summary: summary,
+      severity: severity || "low",
+      tick: tick,
+      timestamp: Date.now(),
+      detail: detail
+    });
+    if (recentActivity.length > MAX_ACTIVITY) {
+      recentActivity.pop();
+    }
+    renderChipBar();
+  }
 
   // ---- DOM refs ----
   const tickCounter      = document.getElementById("tickCounter");
@@ -104,12 +127,39 @@
         if (msg.data.service && typeof window.updateAgentPresence === "function") {
           window.updateAgentPresence(msg.data.agent, msg.data.service);
         }
+        pushActivity(
+          "agent_action", msg.data.service || null, msg.data.agent,
+          (msg.data.agent || "agent") + ": " + (msg.data.message || "").slice(0, 60),
+          "low", msg.data.tick || 0, msg.data
+        );
         break;
       case "code_diff":
         window.dispatchEvent(new CustomEvent("agentdb:code-diff", { detail: msg.data }));
+        var codePath = msg.data.path || "";
+        var codeService = null;
+        if (codePath.startsWith("/city/services/")) {
+          var codeParts = codePath.split("/");
+          if (codeParts.length >= 4) codeService = codeParts[3];
+        }
+        pushActivity(
+          "code_change", codeService, msg.data.agent || null,
+          (msg.data.action || "changed") + " " + codePath.split("/").pop(),
+          "low", msg.data.tick || 0, msg.data
+        );
         break;
       case "fs_change":
         window.dispatchEvent(new CustomEvent("agentdb:fs-change", { detail: msg.data }));
+        var fsPath = msg.data.path || "";
+        var fsService = null;
+        if (fsPath.startsWith("/city/services/")) {
+          var fsParts = fsPath.split("/");
+          if (fsParts.length >= 4) fsService = fsParts[3];
+        }
+        pushActivity(
+          "fs_change", fsService, null,
+          msg.data.action + " " + fsPath.split("/").pop(),
+          "low", msg.data.tick || 0, msg.data
+        );
         break;
       case "fs_snapshot":
         window.__agentdb_fs_snapshot = msg.data;
@@ -145,6 +195,11 @@
     totalEvents++;
     eventCount.textContent = totalEvents + " event" + (totalEvents !== 1 ? "s" : "");
     addFeedEntry(data);
+    pushActivity(
+      "event", data.service, null,
+      data.message || data.event_type,
+      data.severity || "low", data.tick || 0, data
+    );
   }
 
   function handleAgentUpdate(data) {
@@ -268,6 +323,10 @@
     empty.textContent = "Waiting for events...";
     activityFeed.appendChild(empty);
   };
+
+  function renderChipBar() {
+    // Implemented in Task 10
+  }
 
   // ---- Init ----
   connect();
