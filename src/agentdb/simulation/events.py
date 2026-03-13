@@ -40,15 +40,19 @@ class CityEvent:
     severity: Severity
     message: str
     tick: int
+    source: str | None = None
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "event_type": self.event_type.value,
             "service": self.service,
             "severity": self.severity.value,
             "message": self.message,
             "tick": self.tick,
         }
+        if self.source is not None:
+            d["source"] = self.source
+        return d
 
 
 def generate_demand(tick: int, seed_offset: int = 0) -> float:
