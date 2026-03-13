@@ -136,11 +136,76 @@
     ctx.restore();
   }
 
+  function dampedSine(t, freq, decay) {
+    return Math.sin(t * freq) * Math.exp(-t * decay);
+  }
+
   function drawNode(node) {
     var isSelected = selectedService === node.id;
+    var now = performance.now();
+    var offsetX = 0;
 
-    // Outer ring (status color)
+    // Shake animation (failed transition, 0.5s)
+    if (node.shakeStart > 0) {
+      var elapsed = (now - node.shakeStart) / 1000;
+      if (elapsed < 0.5) {
+        offsetX = dampedSine(elapsed, 40, 6) * 3;
+      } else {
+        node.shakeStart = 0;
+      }
+    }
+
+    var drawX = node.x + offsetX;
+    var drawY = node.y;
+
+    // Glow animation (failed transition, 3s fade)
+    if (node.glowStart > 0) {
+      var glowElapsed = (now - node.glowStart) / 1000;
+      if (glowElapsed < 3) {
+        var glowAlpha = 0.4 * (1 - glowElapsed / 3);
+        ctx.save();
+        var gradient = ctx.createRadialGradient(
+          drawX, drawY, NODE_RADIUS,
+          drawX, drawY, NODE_RADIUS + 20
+        );
+        gradient.addColorStop(0, node.glowColor || COLORS.failed);
+        gradient.addColorStop(1, "transparent");
+        ctx.globalAlpha = glowAlpha;
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(drawX, drawY, NODE_RADIUS + 20, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      } else {
+        node.glowStart = 0;
+      }
+    }
+
+    // Pulse scale (degraded, continuous 2s cycle)
+    var pulseScale = 1.0;
+    if (node.status === "degraded" && node.pulseStart > 0) {
+      var pulseT = ((now - node.pulseStart) / 1000) % 2;
+      pulseScale = 1 + 0.08 * Math.sin(pulseT * Math.PI);
+    }
+
+    // Recovery flash (ok after failure/degraded, 0.3s)
+    if (node.recoveryStart > 0) {
+      var recElapsed = (now - node.recoveryStart) / 1000;
+      if (recElapsed < 0.3) {
+        ctx.save();
+        ctx.globalAlpha = 0.5 * (1 - recElapsed / 0.3);
+        ctx.fillStyle = COLORS.ok;
+        ctx.beginPath();
+        ctx.arc(drawX, drawY, NODE_RADIUS + 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      } else {
+        node.recoveryStart = 0;
+      }
+    }
+
     var statusColor = COLORS[node.status] || COLORS.ok;
+    var scaledRadius = NODE_RADIUS * pulseScale;
 
     // Glow for selected
     if (isSelected) {
@@ -148,7 +213,7 @@
       ctx.shadowColor = COLORS.selected;
       ctx.shadowBlur = 16;
       ctx.beginPath();
-      ctx.arc(node.x, node.y, NODE_RADIUS + 2, 0, Math.PI * 2);
+      ctx.arc(drawX, drawY, scaledRadius + 2, 0, Math.PI * 2);
       ctx.strokeStyle = COLORS.selected;
       ctx.lineWidth = 2;
       ctx.stroke();
@@ -157,22 +222,22 @@
 
     // Status ring
     ctx.beginPath();
-    ctx.arc(node.x, node.y, NODE_RADIUS, 0, Math.PI * 2);
+    ctx.arc(drawX, drawY, scaledRadius, 0, Math.PI * 2);
     ctx.strokeStyle = statusColor;
     ctx.lineWidth = isSelected ? 3 : 2;
     ctx.stroke();
 
     // Node background
     ctx.beginPath();
-    ctx.arc(node.x, node.y, NODE_RADIUS - 2, 0, Math.PI * 2);
+    ctx.arc(drawX, drawY, scaledRadius - 2, 0, Math.PI * 2);
     ctx.fillStyle = COLORS.nodeBg;
     ctx.fill();
 
-    // Load arc (inner arc showing load %)
+    // Load arc
     if (node.load > 0) {
       var loadAngle = -Math.PI / 2 + Math.PI * 2 * Math.min(node.load, 1);
       ctx.beginPath();
-      ctx.arc(node.x, node.y, NODE_RADIUS - 6, -Math.PI / 2, loadAngle);
+      ctx.arc(drawX, drawY, scaledRadius - 6, -Math.PI / 2, loadAngle);
       ctx.strokeStyle = statusColor;
       ctx.lineWidth = 3;
       ctx.globalAlpha = 0.3;
@@ -180,23 +245,41 @@
       ctx.globalAlpha = 1.0;
     }
 
-    // Status dot (small indicator inside the circle)
+    // Status dot
     ctx.beginPath();
-    ctx.arc(node.x, node.y, 5, 0, Math.PI * 2);
+    ctx.arc(drawX, drawY, 5, 0, Math.PI * 2);
     ctx.fillStyle = statusColor;
     ctx.fill();
 
-    // Label below node
+    // Label
     ctx.font = "500 11px 'JetBrains Mono', monospace";
     ctx.fillStyle = isSelected ? COLORS.selected : COLORS.text;
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
-    ctx.fillText(node.label, node.x, node.y + LABEL_OFFSET);
+    ctx.fillText(node.label, drawX, drawY + LABEL_OFFSET);
 
     // Status text
     ctx.font = "400 9px 'JetBrains Mono', monospace";
     ctx.fillStyle = statusColor;
-    ctx.fillText(node.status.toUpperCase(), node.x, node.y + LABEL_OFFSET + 15);
+    ctx.fillText(node.status.toUpperCase(), drawX, drawY + LABEL_OFFSET + 15);
+
+    // Agent presence dots
+    if (node.agentDots.length > 0) {
+      for (var ai = 0; ai < node.agentDots.length; ai++) {
+        var dot = node.agentDots[ai];
+        var dotAngle = -Math.PI / 2 + (ai * Math.PI * 2) / Math.max(node.agentDots.length, 4);
+        var dotX = drawX + (NODE_RADIUS + 12) * Math.cos(dotAngle);
+        var dotY = drawY + (NODE_RADIUS + 12) * Math.sin(dotAngle);
+
+        ctx.beginPath();
+        ctx.arc(dotX, dotY, 4, 0, Math.PI * 2);
+        ctx.fillStyle = dot.color;
+        ctx.fill();
+        ctx.strokeStyle = COLORS.bg;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    }
   }
 
   // ---- Interaction ----
