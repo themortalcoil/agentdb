@@ -324,9 +324,112 @@
     activityFeed.appendChild(empty);
   };
 
-  function renderChipBar() {
-    // Implemented in Task 10
+  var MAX_VISIBLE_CHIPS = 12;
+
+  var CHIP_ICONS = {
+    event: "\u26A1",
+    agent_action: "\uD83E\uDD16",
+    code_change: "\uD83D\uDCDD",
+    fs_change: "\uD83D\uDCC2"
+  };
+
+  function relativeTime(ts) {
+    var diff = Math.floor((Date.now() - ts) / 1000);
+    if (diff < 60) return diff + "s ago";
+    if (diff < 3600) return Math.floor(diff / 60) + "m ago";
+    return Math.floor(diff / 3600) + "h ago";
   }
+
+  function renderChipBar() {
+    var container = document.getElementById("chipBarChips");
+    if (!container) return;
+
+    var items = chipFilter
+      ? recentActivity.filter(function (a) { return a.service === chipFilter; })
+      : recentActivity;
+
+    var visible = items.slice(0, MAX_VISIBLE_CHIPS);
+
+    while (container.firstChild) {
+      container.removeChild(container.firstChild);
+    }
+
+    for (var i = 0; i < visible.length; i++) {
+      var item = visible[i];
+      var chip = document.createElement("div");
+      chip.className = "chip";
+      chip.setAttribute("data-severity", item.severity);
+      chip.setAttribute("data-activity-id", item.id);
+
+      var icon = document.createElement("span");
+      icon.className = "chip-icon";
+      icon.textContent = CHIP_ICONS[item.type] || "\u2022";
+
+      var text = document.createElement("span");
+      text.className = "chip-text";
+      text.textContent = item.summary.slice(0, 40);
+
+      var time = document.createElement("span");
+      time.className = "chip-time";
+      time.textContent = relativeTime(item.timestamp);
+
+      var tooltip = document.createElement("div");
+      tooltip.className = "chip-tooltip";
+      tooltip.textContent = item.summary;
+
+      chip.appendChild(icon);
+      chip.appendChild(text);
+      chip.appendChild(time);
+      chip.appendChild(tooltip);
+
+      // Click: highlight node (source:"chip" so filter listener ignores it) + open diff
+      (function (actItem) {
+        chip.addEventListener("click", function () {
+          if (actItem.service && typeof window.updateServiceNode === "function") {
+            window.dispatchEvent(new CustomEvent("agentdb:service-selected", {
+              detail: { service: actItem.service, label: actItem.service, source: "chip" }
+            }));
+          }
+          if (actItem.type === "code_change" && actItem.detail) {
+            window.dispatchEvent(new CustomEvent("agentdb:code-diff", { detail: actItem.detail }));
+            window.dispatchEvent(new CustomEvent("agentdb:chip-open-diff", { detail: actItem.detail }));
+          }
+        });
+      })(item);
+
+      container.appendChild(chip);
+    }
+  }
+
+  // Listen for service selection to filter chips (only from graph clicks, not chip clicks)
+  window.addEventListener("agentdb:service-selected", function (e) {
+    if (e.detail.source === "chip") return;
+
+    var filterEl = document.getElementById("chipFilter");
+    var filterLabel = document.getElementById("chipFilterLabel");
+
+    if (e.detail.service && e.detail.service !== chipFilter) {
+      chipFilter = e.detail.service;
+      if (filterEl) filterEl.style.display = "flex";
+      if (filterLabel) filterLabel.textContent = "Showing: " + e.detail.service;
+    } else {
+      chipFilter = null;
+      if (filterEl) filterEl.style.display = "none";
+    }
+    renderChipBar();
+  });
+
+  var clearBtn = document.getElementById("chipFilterClear");
+  if (clearBtn) {
+    clearBtn.addEventListener("click", function (evt) {
+      evt.stopPropagation();
+      chipFilter = null;
+      document.getElementById("chipFilter").style.display = "none";
+      renderChipBar();
+    });
+  }
+
+  setInterval(renderChipBar, 10000);
 
   // ---- Init ----
   connect();
