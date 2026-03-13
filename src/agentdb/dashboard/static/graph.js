@@ -334,8 +334,14 @@
       if (typeof window.selectService === "function") {
         window.selectService(clicked.label, clicked.status, clicked.load, clicked.capacity);
       }
+      window.dispatchEvent(new CustomEvent("agentdb:service-selected", {
+        detail: { service: clicked.id, label: clicked.label }
+      }));
     } else {
       selectedService = null;
+      window.dispatchEvent(new CustomEvent("agentdb:service-selected", {
+        detail: { service: null, label: null }
+      }));
     }
   }
 
