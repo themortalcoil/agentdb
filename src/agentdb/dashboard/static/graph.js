@@ -232,9 +232,25 @@
   window.updateServiceNode = function (id, status, load, capacity) {
     var node = findNode(id);
     if (!node) return;
+
+    var oldStatus = node.status;
     node.status   = status   || node.status;
     node.load     = load     != null ? load     : node.load;
     node.capacity = capacity != null ? capacity : node.capacity;
+
+    var now = performance.now();
+    if (oldStatus !== node.status) {
+      node.prevStatus = oldStatus;
+      if (node.status === "failed") {
+        node.shakeStart = now;
+        node.glowStart = now;
+        node.glowColor = COLORS.failed;
+      } else if (node.status === "degraded" && oldStatus === "ok") {
+        node.pulseStart = now;
+      } else if (node.status === "ok" && oldStatus !== "ok") {
+        node.recoveryStart = now;
+      }
+    }
   };
 
   // ---- Resize ----
@@ -274,10 +290,18 @@
               return w.charAt(0).toUpperCase() + w.slice(1);
             }).join(" "),
             status: "ok",
+            prevStatus: "ok",
             load: 0.5,
             capacity: data.capacities[id] || 1.0,
             x: 0,
-            y: 0
+            y: 0,
+            // Transition animation state
+            shakeStart: 0,
+            glowStart: 0,
+            glowColor: null,
+            pulseStart: 0,
+            recoveryStart: 0,
+            agentDots: []
           };
         });
 
