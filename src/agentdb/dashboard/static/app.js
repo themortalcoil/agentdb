@@ -90,6 +90,11 @@
         break;
       case "city_event":
         handleCityEvent(msg.data);
+        if (msg.data.event_type === "cascade_failure" && msg.data.source) {
+          if (typeof window.triggerCascadeEdge === "function") {
+            window.triggerCascadeEdge(msg.data.source, msg.data.service);
+          }
+        }
         break;
       case "agent_update":
         handleAgentUpdate(msg.data);

@@ -114,6 +114,35 @@
       ctx.fillStyle = flowColor;
       ctx.fill();
 
+      // Cascade pulse animation (0.4s travel + 2s red highlight)
+      if (edges[i].cascadeStart > 0) {
+        var cascadeElapsed = (performance.now() - edges[i].cascadeStart) / 1000;
+
+        if (cascadeElapsed < 2.4) {
+          var edgeAlpha = cascadeElapsed < 0.4 ? 1.0 : Math.max(0, 1 - (cascadeElapsed - 0.4) / 2);
+          ctx.beginPath();
+          ctx.moveTo(fromNode.x, fromNode.y);
+          ctx.lineTo(toNode.x, toNode.y);
+          ctx.strokeStyle = COLORS.failed;
+          ctx.lineWidth = 3;
+          ctx.globalAlpha = edgeAlpha;
+          ctx.stroke();
+          ctx.globalAlpha = 1.0;
+
+          if (cascadeElapsed < 0.4) {
+            var pt = cascadeElapsed / 0.4;
+            var px = fromNode.x + (toNode.x - fromNode.x) * pt;
+            var py = fromNode.y + (toNode.y - fromNode.y) * pt;
+            ctx.beginPath();
+            ctx.arc(px, py, 5, 0, Math.PI * 2);
+            ctx.fillStyle = COLORS.failed;
+            ctx.fill();
+          }
+        } else {
+          edges[i].cascadeStart = 0;
+        }
+      }
+
       // Direction arrow at midpoint
       var mx = (fromNode.x + toNode.x) / 2;
       var my = (fromNode.y + toNode.y) / 2;
@@ -336,6 +365,16 @@
     }
   };
 
+  window.triggerCascadeEdge = function (sourceId, targetId) {
+    for (var i = 0; i < edges.length; i++) {
+      if (edges[i].from === sourceId && edges[i].to === targetId) {
+        edges[i].cascadeStart = performance.now();
+        edges[i].cascadeColor = COLORS.failed;
+        return;
+      }
+    }
+  };
+
   // ---- Resize ----
 
   function resize() {
@@ -392,7 +431,12 @@
         edges = [];
         Object.keys(data.edges).forEach(function (child) {
           data.edges[child].forEach(function (parent) {
-            edges.push({ from: parent, to: child });
+            edges.push({
+              from: parent,
+              to: child,
+              cascadeStart: 0,
+              cascadeColor: null
+            });
           });
         });
 
