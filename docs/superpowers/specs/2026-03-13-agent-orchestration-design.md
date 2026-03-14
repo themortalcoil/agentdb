@@ -227,7 +227,7 @@ The orchestrator handles routine dispatch — you handle strategic decisions.
 
 - Unit test: `_triage()` returns correct actions for various KV states (ok, degraded, failed combinations)
 - Unit test: planner prompt parsing handles valid and malformed JSON
-- Unit test: retroactive audit attribution updates rows correctly
+- Unit test: `set_current_agent` flows agent_name through to audit DB rows
 - Unit test: `set_current_agent` flows through to event buffer entries
 - Integration: run app, observe agents completing full deploy pipeline
 
