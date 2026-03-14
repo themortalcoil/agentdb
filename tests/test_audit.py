@@ -69,3 +69,32 @@ def test_audit_default_lock(db):
     audit.log("tool", "{}", '"ok"')
     results = audit.query()
     assert len(results) == 1
+
+
+def test_track_records_agent_name(db):
+    """track() should store agent_name when provided."""
+    audit = AuditLog(db)
+    with audit.track("read_file", "/city/services/power-grid/main.py", agent_name="engineer") as tracker:
+        tracker.result = "file contents"
+    rows = audit.query(limit=1)
+    assert len(rows) == 1
+    assert rows[0]["agent_name"] == "engineer"
+
+
+def test_track_defaults_agent_name_to_none(db):
+    """track() should default agent_name to None for backward compatibility."""
+    audit = AuditLog(db)
+    with audit.track("check_health", "") as tracker:
+        tracker.result = "ok"
+    rows = audit.query(limit=1)
+    assert len(rows) == 1
+    assert rows[0]["agent_name"] is None
+
+
+def test_track_exposes_row_id(db):
+    """track() should set row_id on the tracker after insert."""
+    audit = AuditLog(db)
+    with audit.track("read_file", "/city/test", agent_name="fixer") as tracker:
+        tracker.result = "data"
+    assert tracker.row_id is not None
+    assert isinstance(tracker.row_id, int)
