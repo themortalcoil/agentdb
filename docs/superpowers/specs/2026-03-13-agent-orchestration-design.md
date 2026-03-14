@@ -17,26 +17,35 @@
 - Dashboard can't show which agent performed which action
 - Event buffer entries (WebSocket broadcasts) lack agent identity
 
-### Fix: Retroactive Attribution
+### Fix: set_current_agent + Audit Row ID Collection
 
-After `_invoke_swarm()` returns, `_process_messages` already iterates messages grouped by agent. For each agent's tool calls, we update the corresponding audit log rows with the agent name.
+**`tools.py` changes:**
+- Add `_current_agent: str | None` field and `set_current_agent(name: str | None)` method
+- `_audit_ctx` passes `self._current_agent` to `track()` as `agent_name`
+- `_audit_ctx` stores the inserted audit row ID on a `_recent_audit_ids: list[int]` collector (appended in the `finally` block of `track()`)
+- `_emit()` includes an `agent` field (value of `_current_agent`)
+- Add `pop_audit_ids() -> list[int]` method — returns and clears `_recent_audit_ids`
 
 **`audit.py` changes:**
 - Add `agent_name` parameter to `track()` context manager (default `None` for backward compatibility)
-- Add `update_agent_name(ids: list[int], agent_name: str)` method for batch retroactive updates
-
-**`tools.py` changes:**
-- `_audit_ctx` returns the inserted row ID via the tracker
-- `_emit()` includes an `agent` field (value of `_current_agent`)
-- Add `set_current_agent(name: str | None)` method — called by the runner before each agent dispatch
+- Inside `track()`'s `finally` block, capture `cursor.lastrowid` and store it on the `ToolCallTracker` as `row_id`
+- The caller (`_audit_ctx`) reads `tracker.row_id` after the context manager exits and appends to `_recent_audit_ids`
 
 **`runner.py` changes:**
-- Before dispatching each agent task, call `city_tools.set_current_agent(agent_name)` so event buffer entries include attribution
-- After swarm returns, match tool calls to audit rows and update attribution retroactively
+- Before dispatching each agent task, call `city_tools.set_current_agent(agent_name)`
+- This means both audit rows AND event buffer entries get the correct agent name during execution
+- After each dispatch, call `city_tools.pop_audit_ids()` to get the row IDs (for logging/debugging; attribution is already set during execution)
 
-**Why retroactive + set_current_agent (both)?**
-- `set_current_agent` handles the event buffer (real-time WebSocket broadcasts)
-- Retroactive update handles audit log rows (since LangGraph's internal tool execution doesn't pass through our code)
+**Wiring: runner needs access to `city_tools`:**
+- `build_swarm()` in `swarm.py` currently creates `CityTools` as a local variable. Change it to return `(compiled_swarm, city_tools)` as a tuple.
+- `main.py` unpacks the tuple and passes `city_tools` to `AgentRunner.__init__` as a new parameter.
+- `AgentRunner` stores `self._city_tools` for use in `set_current_agent` calls.
+
+**Why set_current_agent works (no retroactive needed):**
+- The runner calls `set_current_agent(agent_name)` before each dispatch
+- LangGraph runs agents sequentially within `ainvoke` — tool calls happen during execution
+- `track()` receives the agent name at call time, writes it to the DB row immediately
+- No post-hoc matching needed
 
 ### Thread Safety
 
@@ -59,10 +68,12 @@ Replace the current single-phase cycle with:
 Read KV state and build a structured picture:
 - Which services are failed/degraded/ok
 - Current load vs capacity per service
-- Open incidents (scan `/city/incidents/` files)
+- Recent incidents: scan `/city/incidents/` files, consider incidents "stale" if created more than 10 ticks ago (triage ignores stale incidents to avoid perpetual re-dispatching; there is no incident close mechanism)
 - What agents attempted last cycle and whether it worked
 
-If everything is ok — no failed or degraded services, no open incidents — broadcast idle status for all agents. No LLM calls. This is the "lightweight check" that runs every cycle.
+If everything is ok — no failed or degraded services, no recent incidents — broadcast idle status for all agents. No LLM calls. This is the "lightweight check" that runs every cycle.
+
+**Triage needs KV and FS access.** The runner receives `kv` and `fs` as new constructor parameters (see wiring changes in Section 4).
 
 **Phase 2: LLM Planner (one call when there's work)**
 
@@ -100,7 +111,13 @@ Respond with JSON only: {"tasks": [{"agent": "...", "instruction": "..."}]}
 
 ### Dispatch Strategy
 
-Run tasks sequentially through the existing swarm (one `ainvoke` per task with targeted prompt). The swarm's handoff mechanism still works — if fixer needs to hand off to monitor, it can.
+Each task from the planner becomes a separate `ainvoke` call with a fresh `thread_id` (e.g., `f"cycle-{cycle}-{task_index}"`). This prevents conversation history from growing unbounded across cycles. The targeted prompt contains all the context the agent needs — no prior conversation required.
+
+The swarm's handoff mechanism still works within a single dispatch — if the planner dispatches engineer, and engineer hands off to fixer within that `ainvoke`, fixer runs in the same call. The planner should prefer dispatching the entry-point agent and letting the swarm chain handle multi-agent workflows (e.g., dispatch engineer who hands off to fixer for hotfix, rather than dispatching them separately).
+
+### Planner Failure Handling
+
+If the planner LLM call fails (timeout, connection error) or returns malformed JSON, the cycle falls back to the current generic prompt: `"Tick N. Check city health..."` via a single swarm `ainvoke`. This ensures agents still run even when the planner is unavailable.
 
 ### Cycle Tracking
 
@@ -108,7 +125,7 @@ The runner keeps `_last_plan` (the plan) and `_last_results` (what happened) so 
 
 ### Changes
 
-- `runner.py` — rewrite `run_cycle()` with three phases; add `_triage()`, `_plan()`, `_dispatch()` methods; add planner prompt template; add `_last_plan` / `_last_results` tracking
+- `runner.py` — rewrite `run_cycle()` with three phases; add `_triage()`, `_plan()`, `_dispatch()` methods; add planner prompt template; add `_last_plan` / `_last_results` tracking; new `ChatOllama` import for planner model
 
 ---
 
@@ -191,14 +208,15 @@ The orchestrator handles routine dispatch — you handle strategic decisions.
 
 | File | Changes |
 |------|---------|
-| `runner.py` | Rewrite `run_cycle()` with 3-phase orchestration; add `_triage()`, `_plan()`, `_dispatch()`; planner prompt; cycle tracking; agent attribution wiring |
-| `audit.py` | Add `agent_name` param to `track()`; add `update_agent_name()` for retroactive attribution |
-| `tools.py` | Add `set_current_agent()`, include `agent` field in `_emit()` events, return audit row IDs from `_audit_ctx` |
+| `runner.py` | Rewrite `run_cycle()` with 3-phase orchestration; add `_triage()`, `_plan()`, `_dispatch()`; planner prompt; cycle tracking; agent attribution via `city_tools.set_current_agent()`; new `ChatOllama` import; accept `city_tools`, `kv`, `fs` constructor params |
+| `audit.py` | Add `agent_name` param to `track()`; capture `lastrowid` on tracker |
+| `tools.py` | Add `set_current_agent()`, `pop_audit_ids()`, `_recent_audit_ids` list; include `agent` field in `_emit()` events; pass `_current_agent` to `_audit_ctx` |
 | `definitions.py` | Updated system prompts with explicit workflow checklists |
+| `swarm.py` | `build_swarm()` returns `(compiled_swarm, city_tools)` tuple instead of just the swarm |
+| `main.py` | Unpack `build_swarm()` tuple; pass `city_tools`, `kv`, `fs` to `AgentRunner` |
 
 ### What Does NOT Change
 
-- `swarm.py` — swarm topology and tool wiring unchanged
 - `engine.py` — simulation logic unchanged
 - `evaluator.py` — reads from production FS (correct behavior; the fix is making agents call `hotfix_prod`)
 - `overlay.py` — staging/merge logic unchanged
