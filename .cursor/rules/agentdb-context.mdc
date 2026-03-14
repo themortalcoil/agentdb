@@ -1,0 +1,28 @@
+---
+description: AgentDB project context and where to change what
+alwaysApply: true
+---
+
+# AgentDB context
+
+Read **CLAUDE.md** at the project root for full context, commands, and conventions.
+
+## Where to change what
+
+| Change | Location |
+|--------|----------|
+| DB schema, VirtualFS, KV, overlay, audit | `src/agentdb/db/` |
+| Service graph, tick loop, events, evaluator | `src/agentdb/simulation/` |
+| Agent configs, CityTools, swarm build, runner | `src/agentdb/agents/` |
+| Env config, default service code / seeding | `src/agentdb/config.py`, `src/agentdb/seed.py` |
+| App wiring (DB, engine, swarm, FastAPI) | `main.py` |
+| WebSocket broadcast, API, static UI | `src/agentdb/dashboard/` |
+
+## Conventions
+
+- Paths used by agents must be under `/city/` (CityTools validates).
+- Service contract: `handle_load(load, config)` in `/city/services/<name>/main.py`.
+- Use `CityTools.set_current_agent(name)` before dispatching so audit and events are attributed.
+- Tests: `conftest.py` provides `db`; async tests use `async def` (pytest-asyncio).
+
+Specs and implementation plans: `docs/superpowers/specs/`, `docs/superpowers/plans/`.
