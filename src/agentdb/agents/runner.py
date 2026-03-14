@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import json
+import time
 import traceback
 
 from langchain_core.messages import AIMessage, HumanMessage
 
 from agentdb.dashboard.broadcast import Broadcaster
+from agentdb.db.filesystem import VirtualFS
+from agentdb.db.kvstore import KVStore
 from agentdb.simulation.engine import SimulationEngine
 
 
@@ -18,6 +22,9 @@ class AgentRunner:
         engine: SimulationEngine,
         event_buffer: list,
         agent_names: list[str],
+        kv: KVStore | None = None,
+        fs: VirtualFS | None = None,
+        city_tools=None,
         thread_id: str = "city-sim",
     ):
         self._swarm = swarm
@@ -25,8 +32,13 @@ class AgentRunner:
         self._engine = engine
         self._event_buffer = event_buffer
         self._agent_names = agent_names
+        self._kv = kv
+        self._fs = fs
+        self._city_tools = city_tools
         self._thread_id = thread_id
         self._cycle_counter = 0
+        self._last_plan: dict | None = None
+        self._last_results: dict | None = None
 
     @staticmethod
     def _extract_service(tool_calls: list[dict]) -> str | None:
@@ -43,6 +55,53 @@ class AgentRunner:
                 if len(parts) >= 4:
                     return parts[3]
         return None
+
+    def _triage(self) -> dict:
+        """Deterministic triage: inspect KV state and FS for actionable work."""
+        failed = []
+        degraded = []
+        services = {}
+
+        if self._kv is not None:
+            service_keys = self._kv.list_prefix("service:")
+            service_names = sorted({k.split(":")[1] for k, _ in service_keys})
+            for svc in service_names:
+                status = self._kv.get(f"service:{svc}:status", "ok")
+                load = self._kv.get(f"service:{svc}:load", "0.5")
+                capacity = self._kv.get(f"service:{svc}:capacity", "1.0")
+                services[svc] = {"status": status, "load": load, "capacity": capacity}
+                if status == "failed":
+                    failed.append(svc)
+                elif status == "degraded":
+                    degraded.append(svc)
+
+        # Scan recent incidents (ignore stale ones > 60 seconds old)
+        recent_incidents = []
+        if self._fs is not None:
+            incident_names = self._fs.list_dir("/city/incidents")
+            for name in incident_names:
+                content = self._fs.read_file(f"/city/incidents/{name}")
+                if content is None:
+                    continue
+                try:
+                    inc = json.loads(content)
+                except json.JSONDecodeError:
+                    continue
+                created_at = inc.get("created_at", 0)
+                age_seconds = time.time() - created_at
+                if age_seconds <= 60:
+                    recent_incidents.append(inc)
+
+        needs_action = len(failed) > 0 or len(degraded) > 0 or len(recent_incidents) > 0
+
+        return {
+            "needs_action": needs_action,
+            "failed": failed,
+            "degraded": degraded,
+            "services": services,
+            "recent_incidents": recent_incidents,
+            "tick": self._engine.tick,
+        }
 
     async def run_cycle(self) -> None:
         """Run one agent decision cycle. Broadcasts status before/during/after."""
