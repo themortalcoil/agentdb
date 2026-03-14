@@ -101,3 +101,56 @@ def test_create_incident_uses_total_created_key(city_tools):
     # active_count should not be touched by tools
     active = city_tools.kv.get("incident:active_count")
     assert active is None
+
+
+def test_set_current_agent_flows_to_audit(db):
+    """set_current_agent should cause audit rows to record agent_name."""
+    fs = VirtualFS(db)
+    kv = KVStore(db)
+    overlay = OverlayFS(db, fs)
+    audit = AuditLog(db)
+    tools = CityTools(fs=fs, kv=kv, overlay=overlay, audit=audit)
+
+    tools.set_current_agent("engineer")
+    fs.write_file("/city/services/power-grid/main.py", "print('hello')")
+    result = tools.read_file("/city/services/power-grid/main.py")
+    assert result == "print('hello')"
+
+    rows = audit.query(name="read_file", limit=1)
+    assert len(rows) == 1
+    assert rows[0]["agent_name"] == "engineer"
+
+
+def test_set_current_agent_flows_to_event_buffer(db):
+    """set_current_agent should cause _emit to include agent field."""
+    fs = VirtualFS(db)
+    kv = KVStore(db)
+    overlay = OverlayFS(db, fs)
+    buffer = []
+    tools = CityTools(fs=fs, kv=kv, overlay=overlay, event_buffer=buffer)
+
+    tools.set_current_agent("fixer")
+    fs.write_file("/city/services/power-grid/main.py", "old code")
+    tools.write_file("/city/services/power-grid/main.py", "new code")
+
+    # Events emitted by write_file should include agent field
+    assert len(buffer) >= 1
+    for event in buffer:
+        assert event.get("agent") == "fixer"
+
+
+def test_pop_audit_ids(db):
+    """pop_audit_ids should return and clear collected row IDs."""
+    fs = VirtualFS(db)
+    kv = KVStore(db)
+    overlay = OverlayFS(db, fs)
+    audit = AuditLog(db)
+    tools = CityTools(fs=fs, kv=kv, overlay=overlay, audit=audit)
+
+    tools.set_current_agent("monitor")
+    tools.check_health()
+    ids = tools.pop_audit_ids()
+    assert len(ids) >= 1
+    assert all(isinstance(i, int) for i in ids)
+    # Second call should return empty
+    assert tools.pop_audit_ids() == []

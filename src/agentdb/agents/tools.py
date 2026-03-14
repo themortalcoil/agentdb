@@ -33,10 +33,22 @@ class CityTools:
         self._incident_counter = 0
         self._events = event_buffer if event_buffer is not None else []
         self._audit = audit
+        self._current_agent: str | None = None
+        self._recent_audit_ids: list[int] = []
+
+    def set_current_agent(self, name: str | None) -> None:
+        """Set the agent name for attribution on subsequent tool calls."""
+        self._current_agent = name
+
+    def pop_audit_ids(self) -> list[int]:
+        """Return and clear collected audit row IDs."""
+        ids = self._recent_audit_ids
+        self._recent_audit_ids = []
+        return ids
 
     def _emit(self, event_type: str, **kwargs) -> None:
         """Append an event to the event buffer."""
-        self._events.append({"type": event_type, **kwargs})
+        self._events.append({"type": event_type, "agent": self._current_agent, **kwargs})
 
     def _validate_path(self, path: str) -> str | None:
         """Return error string if path is invalid, None if OK."""
@@ -49,8 +61,10 @@ class CityTools:
         if self._audit is None:
             yield
             return
-        with self._audit.track(name, params) as tracker:
+        with self._audit.track(name, params, agent_name=self._current_agent) as tracker:
             yield tracker
+        if tracker.row_id is not None:
+            self._recent_audit_ids.append(tracker.row_id)
 
     # --- Mayor tools ---
 
