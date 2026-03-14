@@ -1,4 +1,9 @@
-"""Agent runner -- executes one LLM decision cycle and broadcasts results."""
+"""Agent runner — one LLM orchestration cycle (triage → plan → dispatch) and broadcast.
+
+Consumes SimulationEngine + optional LangGraph Swarm; broadcasts agent_message,
+agent_update, and city_event via Broadcaster. Agent attribution flows through
+CityTools.set_current_agent() into audit and event buffers.
+"""
 
 from __future__ import annotations
 
@@ -6,9 +11,11 @@ import json
 import re
 import time
 import traceback
+from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 
+from agentdb.agents.tools import CityTools
 from agentdb.dashboard.broadcast import Broadcaster
 from agentdb.db.filesystem import VirtualFS
 from agentdb.db.kvstore import KVStore
@@ -36,18 +43,20 @@ Respond with JSON only: {{"tasks": [{{"agent": "...", "instruction": "..."}}]}}"
 
 
 class AgentRunner:
+    """Runs one orchestration cycle: triage (KV/FS) → LLM plan → dispatch swarm; broadcasts results."""
+
     def __init__(
         self,
-        swarm,
+        swarm: Any,  # LangGraph compiled swarm (create_swarm(...).compile())
         broadcaster: Broadcaster,
         engine: SimulationEngine,
-        event_buffer: list,
+        event_buffer: list[dict[str, Any]],
         agent_names: list[str],
         kv: KVStore | None = None,
         fs: VirtualFS | None = None,
-        city_tools=None,
+        city_tools: CityTools | None = None,
         thread_id: str = "city-sim",
-    ):
+    ) -> None:
         self._swarm = swarm
         self._broadcaster = broadcaster
         self._engine = engine

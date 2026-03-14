@@ -5,14 +5,13 @@ starts the simulation engine, and serves the FastAPI dashboard on port 8000.
 """
 
 import asyncio
-import json
-import os
 import sqlite3
-import textwrap
 import threading
 
 import uvicorn
 
+from agentdb.config import DB_PATH, TICK_INTERVAL, HOST, PORT
+from agentdb.seed import seed_services, seed_kv_state
 from agentdb.db.schema import init_db
 from agentdb.db.audit import AuditLog
 from agentdb.db.filesystem import VirtualFS
@@ -25,55 +24,7 @@ from agentdb.agents.runner import AgentRunner
 from agentdb.dashboard.broadcast import Broadcaster
 from agentdb.dashboard.app import create_app
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-DB_PATH = os.environ.get("AGENTDB_DB", "city.db")
-TICK_INTERVAL = float(os.environ.get("TICK_INTERVAL", "5"))
 
-SERVICE_CODE = textwrap.dedent("""\
-    def handle_load(load: float, config: dict) -> dict:
-        capacity = config.get("capacity", 1.0)
-        utilization = load / capacity if capacity > 0 else float("inf")
-        if utilization > 1.2:
-            status = "failed"
-        elif utilization > 0.9:
-            status = "degraded"
-        else:
-            status = "ok"
-        return {
-            "status": status,
-            "capacity": capacity,
-            "metrics": {"utilization": round(utilization, 3)},
-        }
-""")
-
-# ---------------------------------------------------------------------------
-# Seeding helpers
-# ---------------------------------------------------------------------------
-def seed_services(fs: VirtualFS, graph: ServiceGraph) -> None:
-    """Write default handle_load code and config.json for each service."""
-    for name in graph.services:
-        capacity = graph.capacities.get(name, 1.0)
-        fs.write_file(f"/city/services/{name}/main.py", SERVICE_CODE)
-        fs.write_file(f"/city/services/{name}/config.json", json.dumps({"capacity": capacity}))
-
-
-def seed_kv_state(kv: KVStore, graph: ServiceGraph) -> None:
-    """Populate initial KV entries for city state."""
-    initial: dict[str, str] = {
-        "city:population": "10000",
-        "city:budget": "100000",
-    }
-    for name in graph.services:
-        initial[f"service:{name}:status"] = "ok"
-        initial[f"service:{name}:load"] = "0.5"
-    kv.set_many(initial)
-
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 async def main() -> None:
     # 1. Database
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -165,7 +116,7 @@ async def main() -> None:
     loop_task = asyncio.create_task(simulation_loop())
 
     # 11. Start uvicorn
-    config = uvicorn.Config(app, host="0.0.0.0", port=8000, log_level="info")
+    config = uvicorn.Config(app, host=HOST, port=PORT, log_level="info")
     server = uvicorn.Server(config)
     try:
         await server.serve()

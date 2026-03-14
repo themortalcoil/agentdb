@@ -3,5 +3,11 @@ __pycache__/
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
 .venv/
 .superpowers/
+.pytest_cache/
+.env
+.env.local
+.DS_Store
