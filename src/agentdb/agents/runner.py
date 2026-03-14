@@ -167,7 +167,83 @@ class AgentRunner:
         return []
 
     async def run_cycle(self) -> None:
-        """Run one agent decision cycle. Broadcasts status before/during/after."""
+        """Run one orchestration cycle: triage → plan → dispatch."""
+        if self._swarm is None:
+            await self._broadcast_idle_all()
+            return
+
+        # Phase 1: Deterministic triage
+        triage = self._triage()
+        if not triage["needs_action"]:
+            await self._broadcast_idle_all()
+            return
+
+        # Phase 2: LLM planner
+        planned_tasks = await self._plan(triage)
+
+        # Phase 3: Dispatch
+        if planned_tasks:
+            await self._dispatch_planned(planned_tasks)
+        else:
+            # Fallback: generic prompt (planner failed or returned empty)
+            await self._dispatch_generic()
+
+    async def _dispatch_planned(self, tasks: list[dict]) -> None:
+        """Dispatch agents with targeted instructions from the planner."""
+        self._cycle_counter += 1
+        all_participated: dict[str, str] = {}
+
+        for i, task in enumerate(tasks):
+            agent_name = task.get("agent", "")
+            instruction = task.get("instruction", "")
+            if not agent_name or not instruction:
+                continue
+
+            if self._city_tools is not None:
+                self._city_tools.set_current_agent(agent_name)
+
+            await self._broadcaster.broadcast("agent_update", {
+                "agent": agent_name, "status": "working",
+                "message": instruction[:200],
+                "tick": self._engine.tick,
+            })
+
+            try:
+                thread_id = f"cycle-{self._cycle_counter}-{i}"
+                prompt = f"Tick {self._engine.tick}. {instruction}"
+                result = await self._swarm.ainvoke(
+                    {"messages": [HumanMessage(content=prompt)]},
+                    config={"configurable": {"thread_id": thread_id}},
+                )
+                participated = await self._process_messages(result)
+                all_participated.update(participated)
+            except Exception as exc:
+                print(f"[tick {self._engine.tick}] Dispatch error ({agent_name}): {exc}")
+                await self._broadcaster.broadcast("agent_update", {
+                    "agent": agent_name, "status": "error",
+                    "message": str(exc)[:200], "tick": self._engine.tick,
+                })
+
+        # Clear agent attribution and drain audit IDs
+        if self._city_tools is not None:
+            self._city_tools.pop_audit_ids()
+            self._city_tools.set_current_agent(None)
+
+        await self._flush_event_buffer()
+        await self._broadcast_agent_statuses(all_participated)
+
+        # Track results for next cycle's planner
+        self._last_plan = {"tasks": tasks}
+        self._last_results = {
+            "participated": list(all_participated.keys()),
+            "tick": self._engine.tick,
+        }
+        print(f"[tick {self._engine.tick}] Planned: {len(tasks)} tasks, "
+              f"Agents: {', '.join(all_participated.keys()) or 'none'}")
+
+    async def _dispatch_generic(self) -> None:
+        """Fallback: dispatch all agents with the original generic prompt."""
+        self._cycle_counter += 1
         for name in self._agent_names:
             await self._broadcaster.broadcast("agent_update", {
                 "agent": name, "status": "working",
@@ -175,17 +251,22 @@ class AgentRunner:
                 "tick": self._engine.tick,
             })
 
-        if self._swarm is None:
-            await self._broadcast_idle_all()
-            return
-
         try:
-            result = await self._invoke_swarm()
-            self._cycle_counter += 1
+            thread_id = f"cycle-{self._cycle_counter}-generic"
+            prompt = (
+                f"Tick {self._engine.tick}. Check city health. "
+                "If any service is degraded or failed, create an incident "
+                "and hand off to the appropriate agent. Otherwise report status."
+            )
+            result = await self._swarm.ainvoke(
+                {"messages": [HumanMessage(content=prompt)]},
+                config={"configurable": {"thread_id": thread_id}},
+            )
             participated = await self._process_messages(result)
             await self._flush_event_buffer()
             await self._broadcast_agent_statuses(participated)
-            print(f"[tick {self._engine.tick}] Agents: {', '.join(participated.keys()) or 'none'}")
+            print(f"[tick {self._engine.tick}] Generic dispatch. "
+                  f"Agents: {', '.join(participated.keys()) or 'none'}")
         except Exception as exc:
             print(f"[tick {self._engine.tick}] Agent error: {exc}")
             traceback.print_exc()
@@ -195,17 +276,6 @@ class AgentRunner:
                     "agent": name, "status": "error",
                     "message": str(exc)[:200], "tick": self._engine.tick,
                 })
-
-    async def _invoke_swarm(self) -> dict:
-        prompt = (
-            f"Tick {self._engine.tick}. Check city health. "
-            "If any service is degraded or failed, create an incident "
-            "and hand off to the appropriate agent. Otherwise report status."
-        )
-        return await self._swarm.ainvoke(
-            {"messages": [HumanMessage(content=prompt)]},
-            config={"configurable": {"thread_id": self._thread_id}},
-        )
 
     async def _process_messages(self, result: dict) -> dict[str, str]:
         """Parse LangChain messages and broadcast agent_message events."""
