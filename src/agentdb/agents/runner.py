@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 import traceback
 
@@ -12,6 +13,26 @@ from agentdb.dashboard.broadcast import Broadcaster
 from agentdb.db.filesystem import VirtualFS
 from agentdb.db.kvstore import KVStore
 from agentdb.simulation.engine import SimulationEngine
+
+
+PLANNER_PROMPT = """\
+You are the city operations planner. Given the current city state, decide which agents to dispatch and what each should do.
+
+Rules:
+- Only dispatch agents when there's actionable work
+- Fixer handles failed services (must complete: read → patch → hotfix_prod)
+- Engineer handles degraded services or capacity improvements (must complete: read → deploy_staging → run_tests → hand off to fixer for hotfix)
+- Monitor creates incidents for untracked failures
+- Mayor sets priorities when multiple services need attention
+- Never dispatch an agent without a specific instruction
+
+Current state:
+{triage_summary}
+
+Previous cycle results:
+{last_plan_results}
+
+Respond with JSON only: {{"tasks": [{{"agent": "...", "instruction": "..."}}]}}"""
 
 
 class AgentRunner:
@@ -102,6 +123,48 @@ class AgentRunner:
             "recent_incidents": recent_incidents,
             "tick": self._engine.tick,
         }
+
+    @staticmethod
+    def _parse_plan(raw: str) -> list[dict]:
+        """Parse planner LLM output into a list of task dicts."""
+        # Strip markdown code fences if present
+        match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", raw, re.DOTALL)
+        if match:
+            raw = match.group(1)
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(data, dict):
+            return []
+        tasks = data.get("tasks")
+        if not isinstance(tasks, list):
+            return []
+        return tasks
+
+    async def _plan(self, triage: dict) -> list[dict]:
+        """Call LLM planner to generate targeted agent tasks."""
+        try:
+            from langchain_ollama import ChatOllama
+            planner_llm = ChatOllama(model="glm-5:cloud")
+
+            triage_summary = json.dumps(triage, indent=2)
+            last_results = json.dumps(self._last_results or {}, indent=2)
+            prompt = PLANNER_PROMPT.format(
+                triage_summary=triage_summary,
+                last_plan_results=last_results,
+            )
+
+            response = await planner_llm.ainvoke(prompt)
+            content = response.content if hasattr(response, "content") else str(response)
+            tasks = self._parse_plan(content)
+            if tasks:
+                return tasks
+        except Exception as exc:
+            print(f"[tick {self._engine.tick}] Planner error: {exc}")
+
+        # Fallback: return empty (caller will use generic prompt)
+        return []
 
     async def run_cycle(self) -> None:
         """Run one agent decision cycle. Broadcasts status before/during/after."""

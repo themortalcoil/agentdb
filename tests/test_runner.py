@@ -169,3 +169,47 @@ def test_triage_finds_recent_incidents(db):
     result = runner._triage()
     assert result["needs_action"] is True
     assert len(result["recent_incidents"]) == 1
+
+
+def test_plan_parses_valid_json():
+    """_parse_plan should extract tasks from valid planner JSON."""
+    from agentdb.agents.runner import AgentRunner
+    raw = '{"tasks": [{"agent": "fixer", "instruction": "Fix power-grid"}]}'
+    tasks = AgentRunner._parse_plan(raw)
+    assert len(tasks) == 1
+    assert tasks[0]["agent"] == "fixer"
+    assert tasks[0]["instruction"] == "Fix power-grid"
+
+
+def test_plan_returns_empty_on_malformed_json():
+    """_parse_plan should return empty list on malformed JSON."""
+    from agentdb.agents.runner import AgentRunner
+    assert AgentRunner._parse_plan("not json at all") == []
+    assert AgentRunner._parse_plan('{"tasks": "wrong type"}') == []
+    assert AgentRunner._parse_plan('{"no_tasks_key": []}') == []
+
+
+def test_plan_extracts_json_from_markdown():
+    """_parse_plan should handle JSON wrapped in markdown code fences."""
+    from agentdb.agents.runner import AgentRunner
+    raw = '```json\n{"tasks": [{"agent": "monitor", "instruction": "Create incident"}]}\n```'
+    tasks = AgentRunner._parse_plan(raw)
+    assert len(tasks) == 1
+    assert tasks[0]["agent"] == "monitor"
+
+
+async def test_plan_returns_empty_on_llm_failure(mock_broadcaster, mock_engine):
+    """_plan() should return empty list when LLM call fails."""
+    from unittest.mock import patch
+    runner = AgentRunner(
+        swarm=None,
+        broadcaster=mock_broadcaster,
+        engine=mock_engine,
+        event_buffer=[],
+        agent_names=["monitor"],
+    )
+    triage = {"needs_action": True, "failed": ["power-grid"], "degraded": [],
+              "services": {}, "recent_incidents": [], "tick": 5}
+    with patch("langchain_ollama.ChatOllama", side_effect=Exception("connection refused")):
+        tasks = await runner._plan(triage)
+    assert tasks == []
