@@ -110,9 +110,10 @@ async def main() -> None:
     audit = AuditLog(conn, lock=db_lock)
     event_buffer: list = []
 
+    city_tools = None
     try:
         from agentdb.agents.swarm import build_swarm
-        swarm = build_swarm(fs, kv, overlay, event_buffer=event_buffer, audit=audit)
+        swarm, city_tools = build_swarm(fs, kv, overlay, event_buffer=event_buffer, audit=audit)
         print("Agent swarm initialized.")
     except Exception as exc:  # noqa: BLE001
         swarm = None
@@ -126,6 +127,9 @@ async def main() -> None:
         engine=engine,
         event_buffer=event_buffer,
         agent_names=all_agent_names,
+        kv=kv,
+        fs=fs,
+        city_tools=city_tools,
     )
 
     # 9. FastAPI app

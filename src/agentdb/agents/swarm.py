@@ -62,4 +62,4 @@ def build_swarm(fs: VirtualFS, kv: KVStore, overlay: OverlayFS,
 
     workflow = create_swarm(agents, default_active_agent="monitor")
     checkpointer = InMemorySaver()
-    return workflow.compile(checkpointer=checkpointer)
+    return workflow.compile(checkpointer=checkpointer), city_tools
