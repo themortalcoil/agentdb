@@ -12,3 +12,11 @@ run:
 
 lint:
     uv run ruff check src/ tests/
+
+format:
+    uv run ruff format src/ tests/
+
+fmt: format lint
+
+typecheck:
+    uv run ty check

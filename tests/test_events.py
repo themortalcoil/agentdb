@@ -1,7 +1,10 @@
 import random
 from agentdb.simulation.events import (
-    CityEvent, EventType, Severity,
-    generate_demand, roll_random_events,
+    CityEvent,
+    EventType,
+    Severity,
+    generate_demand,
+    roll_random_events,
 )
 
 
@@ -25,13 +28,9 @@ def test_generate_demand_produces_values():
 
 def test_roll_random_events_deterministic():
     rng = random.Random(42)
-    events1 = roll_random_events(
-        services=["power-grid", "water-system"], tick=10, rng=rng
-    )
+    events1 = roll_random_events(services=["power-grid", "water-system"], tick=10, rng=rng)
     rng2 = random.Random(42)
-    events2 = roll_random_events(
-        services=["power-grid", "water-system"], tick=10, rng=rng2
-    )
+    events2 = roll_random_events(services=["power-grid", "water-system"], tick=10, rng=rng2)
     assert len(events1) == len(events2)
     for e1, e2 in zip(events1, events2):
         assert e1.event_type == e2.event_type

@@ -24,9 +24,7 @@ class VirtualFS:
     def _ensure_root(self) -> None:
         """Create the root inode (ino=1) if it doesn't exist."""
         with self._lock:
-            row = self._conn.execute(
-                "SELECT ino FROM fs_inode WHERE ino = 1"
-            ).fetchone()
+            row = self._conn.execute("SELECT ino FROM fs_inode WHERE ino = 1").fetchone()
             if not row:
                 now = int(time.time())
                 self._conn.execute(

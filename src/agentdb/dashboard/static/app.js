@@ -208,16 +208,18 @@
 
     var energyBar = document.getElementById("energy-" + agent);
     var statusText = document.getElementById("status-" + agent);
-    if (!energyBar || !statusText) return;
+    if (!statusText) return;
 
-    // Update energy bar
-    var energy = data.energy != null ? data.energy : 100;
-    energyBar.style.width = energy + "%";
-    energyBar.className = "energy-bar";
-    if (energy < 30) {
-      energyBar.classList.add("low");
-    } else if (energy < 60) {
-      energyBar.classList.add("medium");
+    // Update energy bar if present
+    if (energyBar) {
+      var energy = data.energy != null ? data.energy : 100;
+      energyBar.style.width = energy + "%";
+      energyBar.className = "energy-bar";
+      if (energy < 30) {
+        energyBar.classList.add("low");
+      } else if (energy < 60) {
+        energyBar.classList.add("medium");
+      }
     }
 
     // Cancel any pending revert timer for this agent
@@ -226,9 +228,9 @@
       agentTimers[agent] = null;
     }
 
-    // Update status text
-    var status = data.status || "idle";
-    statusText.textContent = status;
+    // Update status text (capitalize for display)
+    var status = (data.status || "idle").toLowerCase();
+    statusText.textContent = status.charAt(0).toUpperCase() + status.slice(1);
     statusText.className = "agent-status-text";
     if (status === "active" || status === "working") {
       statusText.classList.add("active");
@@ -240,7 +242,7 @@
       statusText.classList.add("active");
       // Revert to idle after a few seconds
       agentTimers[agent] = setTimeout(function () {
-        statusText.textContent = "idle";
+        statusText.textContent = "Idle";
         statusText.className = "agent-status-text";
         agentTimers[agent] = null;
       }, 8000);

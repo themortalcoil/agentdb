@@ -40,6 +40,15 @@ Environment:
 uv run pytest tests/ -v
 ```
 
+## Lint and format
+
+```bash
+just lint       # ruff check
+just format     # ruff format
+just fmt        # format then lint
+just typecheck  # ty
+```
+
 ## Layout
 
 | Area | Purpose |

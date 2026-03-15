@@ -67,8 +67,10 @@ async def main() -> None:
         swarm, city_tools = build_swarm(fs, kv, overlay, event_buffer=event_buffer, audit=audit)
         print("Agent swarm initialized.")
     except Exception as exc:  # noqa: BLE001
+        import traceback as _tb
         swarm = None
         print(f"Agent swarm unavailable ({exc}); running without agents.")
+        _tb.print_exc()
 
     # 8. Agent runner
     all_agent_names = list(AGENT_CONFIGS.keys())
@@ -84,17 +86,25 @@ async def main() -> None:
     )
 
     # 9. FastAPI app
-    app = create_app(broadcaster, engine=engine, fs=fs, audit=audit)
+    app = create_app(
+        broadcaster,
+        engine=engine,
+        fs=fs,
+        audit=audit,
+        agent_names=all_agent_names,
+    )
 
     # 10. Background simulation loop
     async def broadcast_tick() -> None:
         """Broadcast current tick + service states to all dashboard clients."""
         services = {}
         for name in graph.services:
+            load_raw = kv.get(f"service:{name}:load", "0.5")
+            cap_raw = kv.get(f"service:{name}:capacity", "1.0")
             services[name] = {
                 "status": kv.get(f"service:{name}:status", "ok"),
-                "load": float(kv.get(f"service:{name}:load", "0.5")),
-                "capacity": float(kv.get(f"service:{name}:capacity", "1.0")),
+                "load": float(load_raw or "0.5"),
+                "capacity": float(cap_raw or "1.0"),
             }
         await broadcaster.broadcast("tick", {
             "tick": engine.tick,
@@ -110,6 +120,13 @@ async def main() -> None:
             await broadcast_tick()
             # Run agents concurrently — don't block the tick loop
             if agent_task is None or agent_task.done():
+                # Log any exception from the previous cycle
+                if agent_task is not None and not agent_task.cancelled():
+                    exc = agent_task.exception()
+                    if exc is not None:
+                        import traceback as _tb
+                        print(f"[runner] unhandled exception in run_cycle: {exc}")
+                        _tb.print_exception(type(exc), exc, exc.__traceback__)
                 agent_task = asyncio.create_task(runner.run_cycle())
             await asyncio.sleep(TICK_INTERVAL)
 

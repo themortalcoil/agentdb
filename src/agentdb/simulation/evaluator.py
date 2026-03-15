@@ -13,7 +13,7 @@ EVAL_TIMEOUT = 5  # seconds
 
 # Script run in the child process. Receives JSON on stdin, prints JSON on stdout.
 # Uses a restricted builtins whitelist — no imports, no file I/O, no network.
-_RUNNER_SCRIPT = r'''
+_RUNNER_SCRIPT = r"""
 import json, sys
 
 data = json.loads(sys.stdin.read())
@@ -43,7 +43,7 @@ if not isinstance(result, dict):
     sys.exit(0)
 
 print(json.dumps(result))
-'''
+"""
 
 
 @dataclass
@@ -65,13 +65,9 @@ class ServiceEvaluator:
     def evaluate(self, service_name: str, load: float) -> ServiceResult:
         code = self._fs.read_file(f"/city/services/{service_name}/main.py")
         if code is None:
-            return ServiceResult.failed(
-                f"Service '{service_name}' not found: no main.py"
-            )
+            return ServiceResult.failed(f"Service '{service_name}' not found: no main.py")
 
-        config_raw = self._fs.read_file(
-            f"/city/services/{service_name}/config.json"
-        )
+        config_raw = self._fs.read_file(f"/city/services/{service_name}/config.json")
         try:
             config = json.loads(config_raw) if config_raw else {}
         except json.JSONDecodeError as e:
@@ -97,7 +93,9 @@ class ServiceEvaluator:
             return ServiceResult.failed(f"Subprocess error: {e}")
 
         if proc.returncode != 0:
-            error_msg = stderr.strip() if stderr.strip() else f"Process exited with code {proc.returncode}"
+            error_msg = (
+                stderr.strip() if stderr.strip() else f"Process exited with code {proc.returncode}"
+            )
             return ServiceResult.failed(error_msg)
 
         try:

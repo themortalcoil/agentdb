@@ -69,6 +69,7 @@ class AgentRunner:
         self._cycle_counter = 0
         self._last_plan: dict | None = None
         self._last_results: dict | None = None
+        self._idle_cycles_since_dispatch = 0
 
     @staticmethod
     def _extract_service(tool_calls: list[dict]) -> str | None:
@@ -85,6 +86,20 @@ class AgentRunner:
                 if len(parts) >= 4:
                     return parts[3]
         return None
+
+    async def _broadcast_agent_update(
+        self, agent: str, status: str, message: str = ""
+    ) -> None:
+        """Broadcast a single agent_update event."""
+        await self._broadcaster.broadcast(
+            "agent_update",
+            {
+                "agent": agent,
+                "status": status,
+                "message": message,
+                "tick": self._engine.tick,
+            },
+        )
 
     def _triage(self) -> dict:
         """Deterministic triage: inspect KV state and FS for actionable work."""
@@ -155,6 +170,7 @@ class AgentRunner:
         """Call LLM planner to generate targeted agent tasks."""
         try:
             from langchain_ollama import ChatOllama
+
             planner_llm = ChatOllama(model="glm-5:cloud")
 
             triage_summary = json.dumps(triage, indent=2)
@@ -165,8 +181,9 @@ class AgentRunner:
             )
 
             response = await planner_llm.ainvoke(prompt)
-            content = response.content if hasattr(response, "content") else str(response)
-            tasks = self._parse_plan(content)
+            raw = response.content if hasattr(response, "content") else response
+            content_str = raw if isinstance(raw, str) else str(raw)
+            tasks = self._parse_plan(content_str)
             if tasks:
                 return tasks
         except Exception as exc:
@@ -184,8 +201,16 @@ class AgentRunner:
         # Phase 1: Deterministic triage
         triage = self._triage()
         if not triage["needs_action"]:
-            await self._broadcast_idle_all()
+            self._idle_cycles_since_dispatch += 1
+            # Run a generic dispatch every N idle cycles so the UI shows agent activity
+            if self._idle_cycles_since_dispatch >= 2:
+                self._idle_cycles_since_dispatch = 0
+                await self._dispatch_generic()
+            else:
+                await self._broadcast_idle_all()
             return
+
+        self._idle_cycles_since_dispatch = 0
 
         # Phase 2: LLM planner
         planned_tasks = await self._plan(triage)
@@ -211,11 +236,9 @@ class AgentRunner:
             if self._city_tools is not None:
                 self._city_tools.set_current_agent(agent_name)
 
-            await self._broadcaster.broadcast("agent_update", {
-                "agent": agent_name, "status": "working",
-                "message": instruction[:200],
-                "tick": self._engine.tick,
-            })
+            await self._broadcast_agent_update(
+                agent_name, "working", instruction[:200]
+            )
 
             try:
                 thread_id = f"cycle-{self._cycle_counter}-{i}"
@@ -228,10 +251,9 @@ class AgentRunner:
                 all_participated.update(participated)
             except Exception as exc:
                 print(f"[tick {self._engine.tick}] Dispatch error ({agent_name}): {exc}")
-                await self._broadcaster.broadcast("agent_update", {
-                    "agent": agent_name, "status": "error",
-                    "message": str(exc)[:200], "tick": self._engine.tick,
-                })
+                await self._broadcast_agent_update(
+                    agent_name, "error", str(exc)[:200]
+                )
 
         # Clear agent attribution and drain audit IDs
         if self._city_tools is not None:
@@ -247,18 +269,20 @@ class AgentRunner:
             "participated": list(all_participated.keys()),
             "tick": self._engine.tick,
         }
-        print(f"[tick {self._engine.tick}] Planned: {len(tasks)} tasks, "
-              f"Agents: {', '.join(all_participated.keys()) or 'none'}")
+        print(
+            f"[tick {self._engine.tick}] Planned: {len(tasks)} tasks, "
+            f"Agents: {', '.join(all_participated.keys()) or 'none'}"
+        )
 
     async def _dispatch_generic(self) -> None:
         """Fallback: dispatch all agents with the original generic prompt."""
         self._cycle_counter += 1
         for name in self._agent_names:
-            await self._broadcaster.broadcast("agent_update", {
-                "agent": name, "status": "working",
-                "message": f"Checking city health (tick {self._engine.tick})...",
-                "tick": self._engine.tick,
-            })
+            await self._broadcast_agent_update(
+                name,
+                "working",
+                f"Checking city health (tick {self._engine.tick})...",
+            )
 
         try:
             thread_id = f"cycle-{self._cycle_counter}-generic"
@@ -274,17 +298,16 @@ class AgentRunner:
             participated = await self._process_messages(result)
             await self._flush_event_buffer()
             await self._broadcast_agent_statuses(participated)
-            print(f"[tick {self._engine.tick}] Generic dispatch. "
-                  f"Agents: {', '.join(participated.keys()) or 'none'}")
+            print(
+                f"[tick {self._engine.tick}] Generic dispatch. "
+                f"Agents: {', '.join(participated.keys()) or 'none'}"
+            )
         except Exception as exc:
             print(f"[tick {self._engine.tick}] Agent error: {exc}")
             traceback.print_exc()
             self._event_buffer.clear()
             for name in self._agent_names:
-                await self._broadcaster.broadcast("agent_update", {
-                    "agent": name, "status": "error",
-                    "message": str(exc)[:200], "tick": self._engine.tick,
-                })
+                await self._broadcast_agent_update(name, "error", str(exc)[:200])
 
     async def _process_messages(self, result: dict) -> dict[str, str]:
         """Parse LangChain messages and broadcast agent_message events."""
@@ -295,13 +318,14 @@ class AgentRunner:
                 continue
             if not agent_name or agent_name not in self._agent_names:
                 continue
-            if not getattr(msg, "content", ""):
-                continue
+
+            content = getattr(msg, "content", "")
+            tool_calls_raw = getattr(msg, "tool_calls", []) or []
 
             tools_used = []
             raw_tool_calls = []
             handoff_to = None
-            for tc in getattr(msg, "tool_calls", []) or []:
+            for tc in tool_calls_raw:
                 tool_name = tc.get("name", "")
                 if tool_name.startswith("transfer_to_"):
                     handoff_to = tool_name.replace("transfer_to_", "")
@@ -309,18 +333,34 @@ class AgentRunner:
                     tools_used.append(tool_name)
                     raw_tool_calls.append(tc)
 
+            # Use text content if present; fall back to a summary of tool calls
+            display_content = content if isinstance(content, str) and content else ""
+            if not display_content and tools_used:
+                display_content = "Using tools: " + ", ".join(tools_used)
+            elif not display_content and handoff_to:
+                display_content = f"Handing off to {handoff_to}"
+
+            # Skip completely empty messages (no text, no tools, no handoff)
+            if not display_content:
+                continue
+
             service = self._extract_service(raw_tool_calls)
 
-            await self._broadcaster.broadcast("agent_message", {
-                "cycle_id": self._cycle_counter,
-                "tick": self._engine.tick,
-                "agent": agent_name,
-                "message": msg.content[:500],
-                "tools_used": tools_used,
-                "handoff_to": handoff_to,
-                "service": service,
-            })
-            participated[agent_name] = msg.content[:200]
+            await self._broadcaster.broadcast(
+                "agent_message",
+                {
+                    "cycle_id": self._cycle_counter,
+                    "tick": self._engine.tick,
+                    "agent": agent_name,
+                    "message": display_content[:500],
+                    "tools_used": tools_used,
+                    "handoff_to": handoff_to,
+                    "service": service,
+                },
+            )
+            # Record participation using richest available content
+            best = content if isinstance(content, str) and content else display_content
+            participated[agent_name] = best[:200]
 
         return participated
 
@@ -336,26 +376,21 @@ class AgentRunner:
     async def _broadcast_agent_statuses(self, participated: dict[str, str]) -> None:
         """Send acted/idle status for each agent."""
         for name, summary in participated.items():
-            await self._broadcaster.broadcast("agent_update", {
-                "agent": name, "status": "acted",
-                "message": summary, "tick": self._engine.tick,
-            })
-            await self._broadcaster.broadcast("city_event", {
-                "event_type": "agent_action", "service": name,
-                "severity": "low",
-                "message": f"Agent {name}: {summary[:120]}",
-                "tick": self._engine.tick,
-            })
+            await self._broadcast_agent_update(name, "acted", summary)
+            await self._broadcaster.broadcast(
+                "city_event",
+                {
+                    "event_type": "agent_action",
+                    "service": name,
+                    "severity": "low",
+                    "message": f"Agent {name}: {summary[:120]}",
+                    "tick": self._engine.tick,
+                },
+            )
         for name in self._agent_names:
             if name not in participated:
-                await self._broadcaster.broadcast("agent_update", {
-                    "agent": name, "status": "idle",
-                    "message": "", "tick": self._engine.tick,
-                })
+                await self._broadcast_agent_update(name, "idle", "")
 
     async def _broadcast_idle_all(self) -> None:
         for name in self._agent_names:
-            await self._broadcaster.broadcast("agent_update", {
-                "agent": name, "status": "idle",
-                "message": "", "tick": self._engine.tick,
-            })
+            await self._broadcast_agent_update(name, "idle", "")

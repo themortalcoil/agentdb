@@ -37,18 +37,17 @@ def _make_langchain_tools(city_tools: CityTools, tool_names: list[str]) -> list:
     return tools
 
 
-def build_swarm(fs: VirtualFS, kv: KVStore, overlay: OverlayFS,
-                event_buffer: list | None = None, audit=None):
+def build_swarm(
+    fs: VirtualFS, kv: KVStore, overlay: OverlayFS, event_buffer: list | None = None, audit=None
+):
     """Build and compile the LangGraph Swarm with all city agents."""
-    city_tools = CityTools(fs=fs, kv=kv, overlay=overlay,
-                           event_buffer=event_buffer, audit=audit)
+    city_tools = CityTools(fs=fs, kv=kv, overlay=overlay, event_buffer=event_buffer, audit=audit)
     agents = []
 
     for config in AGENT_CONFIGS.values():
         llm = ChatOllama(model=config.model)
         handoff_tools = [
-            create_handoff_tool(agent_name=target)
-            for target in config.handoff_targets
+            create_handoff_tool(agent_name=target) for target in config.handoff_targets
         ]
         lc_tools = _make_langchain_tools(city_tools, config.tool_names)
 

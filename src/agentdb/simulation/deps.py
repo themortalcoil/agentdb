@@ -16,9 +16,7 @@ class ServiceGraph:
 
     @classmethod
     def default_city(cls) -> "ServiceGraph":
-        services = [
-            "power-grid", "water-system", "traffic-control", "comms-network"
-        ]
+        services = ["power-grid", "water-system", "traffic-control", "comms-network"]
         edges = {
             "power-grid": [],
             "water-system": ["power-grid"],

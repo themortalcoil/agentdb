@@ -1,6 +1,7 @@
 """City simulation engine -- the heartbeat of the city."""
 
 import random
+import sqlite3
 from collections.abc import Callable
 
 from agentdb.db.filesystem import VirtualFS
@@ -8,15 +9,18 @@ from agentdb.db.kvstore import KVStore
 from agentdb.simulation.deps import ServiceGraph
 from agentdb.simulation.evaluator import ServiceEvaluator
 from agentdb.simulation.events import (
-    CityEvent, EventType, Severity,
-    generate_demand, roll_random_events,
+    CityEvent,
+    EventType,
+    Severity,
+    generate_demand,
+    roll_random_events,
 )
 
 
 class SimulationEngine:
     def __init__(
         self,
-        conn,
+        conn: sqlite3.Connection,
         fs: VirtualFS,
         kv: KVStore,
         seed: int = 0,
@@ -66,7 +70,8 @@ class SimulationEngine:
         # 2. Evaluate each service's code
         failed_services: list[str] = []
         for service in self._graph.services:
-            load = float(self._kv.get(f"service:{service}:load", "0.5"))
+            load_raw = self._kv.get(f"service:{service}:load", "0.5")
+            load = float(load_raw or "0.5")
             result = self._evaluator.evaluate(service, load)
             old_status = self._kv.get(f"service:{service}:status", "ok")
             self._kv.set(f"service:{service}:status", result.status)
@@ -83,9 +88,7 @@ class SimulationEngine:
                 all_events.append(event)
                 failed_services.append(service)
             elif (
-                result.status == "degraded"
-                and old_status != "degraded"
-                and load > result.capacity
+                result.status == "degraded" and old_status != "degraded" and load > result.capacity
             ):
                 event = CityEvent(
                     event_type=EventType.DEMAND_SPIKE,
@@ -114,16 +117,12 @@ class SimulationEngine:
                     all_events.append(event)
 
         # 4. Roll random events
-        random_events = roll_random_events(
-            self._graph.services, self.tick, self._rng
-        )
+        random_events = roll_random_events(self._graph.services, self.tick, self._rng)
         all_events.extend(random_events)
 
         # 5. Update active incident count
         failure_count = sum(
-            1
-            for s in self._graph.services
-            if self._kv.get(f"service:{s}:status") == "failed"
+            1 for s in self._graph.services if self._kv.get(f"service:{s}:status") == "failed"
         )
         self._kv.set("incident:active_count", str(failure_count))
 

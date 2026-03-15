@@ -83,20 +83,20 @@ class CityTools:
             self.kv.set("mayor:priority", priority)
             return f"Priority set to: {priority}"
 
-    def assign_task(
-        self, service: str, description: str, assigned_to: str
-    ) -> str:
+    def assign_task(self, service: str, description: str, assigned_to: str) -> str:
         """Create a task assignment for an agent."""
         with self._audit_ctx("assign_task", f"{service}:{assigned_to}"):
             task_id = f"TASK-{int(time.time()) % 100000:05d}"
-            task_data = json.dumps({
-                "id": task_id,
-                "service": service,
-                "description": description,
-                "assigned_to": assigned_to,
-                "status": "assigned",
-                "created_at": int(time.time()),
-            })
+            task_data = json.dumps(
+                {
+                    "id": task_id,
+                    "service": service,
+                    "description": description,
+                    "assigned_to": assigned_to,
+                    "status": "assigned",
+                    "created_at": int(time.time()),
+                }
+            )
             task_path = f"/city/plans/{task_id}.json"
             self.fs.write_file(task_path, task_data)
             self._emit("fs_change", path=task_path, action="write", size=len(task_data))
@@ -111,7 +111,9 @@ class CityTools:
                 return err
             old_content = self.fs.read_file(path)
             self.fs.write_file(path, content)
-            self._emit("code_diff", path=path, old_content=old_content, new_content=content, action="write")
+            self._emit(
+                "code_diff", path=path, old_content=old_content, new_content=content, action="write"
+            )
             self._emit("fs_change", path=path, action="write", size=len(content))
             return f"Written {len(content)} bytes to {path}"
 
@@ -132,7 +134,9 @@ class CityTools:
                 return err
             old_content = self.fs.read_file(path)
             self.overlay.write_file(path, content)
-            self._emit("code_diff", path=path, old_content=old_content, new_content=content, action="stage")
+            self._emit(
+                "code_diff", path=path, old_content=old_content, new_content=content, action="stage"
+            )
             self._emit("fs_change", path=path, action="stage", size=len(content))
             return f"Staged {len(content)} bytes to {path}"
 
@@ -155,9 +159,7 @@ class CityTools:
         with self._audit_ctx("read_metrics", service):
             status = self.kv.get(f"service:{service}:status", "unknown")
             load = self.kv.get(f"service:{service}:load", "0")
-            return json.dumps({
-                "service": service, "status": status, "load": load
-            })
+            return json.dumps({"service": service, "status": status, "load": load})
 
     def check_health(self) -> str:
         """Check health of all services (discovered from KV store)."""
@@ -172,25 +174,26 @@ class CityTools:
                 }
             return json.dumps(health, indent=2)
 
-    def create_incident(
-        self, service: str, description: str, severity: str
-    ) -> str:
+    def create_incident(self, service: str, description: str, severity: str) -> str:
         """Create an incident record."""
         with self._audit_ctx("create_incident", f"{service}:{severity}"):
             self._incident_counter += 1
             inc_id = f"INC-{self._incident_counter:03d}"
-            incident = json.dumps({
-                "id": inc_id,
-                "service": service,
-                "description": description,
-                "severity": severity,
-                "status": "open",
-                "created_at": int(time.time()),
-            })
+            incident = json.dumps(
+                {
+                    "id": inc_id,
+                    "service": service,
+                    "description": description,
+                    "severity": severity,
+                    "status": "open",
+                    "created_at": int(time.time()),
+                }
+            )
             path = f"/city/incidents/{inc_id}.json"
             self.fs.write_file(path, incident)
             self._emit("fs_change", path=path, action="write", size=len(incident))
-            count = int(self.kv.get("incident:total_created", "0")) + 1
+            raw = self.kv.get("incident:total_created", "0")
+            count = int(raw or "0") + 1
             self.kv.set("incident:total_created", str(count))
             return inc_id
 
@@ -203,7 +206,9 @@ class CityTools:
                 return err
             old_content = self.fs.read_file(path)
             self.overlay.write_file(path, content)
-            self._emit("code_diff", path=path, old_content=old_content, new_content=content, action="stage")
+            self._emit(
+                "code_diff", path=path, old_content=old_content, new_content=content, action="stage"
+            )
             self._emit("fs_change", path=path, action="stage", size=len(content))
             return f"Patched {path} in staging ({len(content)} bytes)"
 

@@ -1,5 +1,4 @@
 import threading
-import time
 from agentdb.db.audit import AuditLog
 
 
@@ -74,7 +73,9 @@ def test_audit_default_lock(db):
 def test_track_records_agent_name(db):
     """track() should store agent_name when provided."""
     audit = AuditLog(db)
-    with audit.track("read_file", "/city/services/power-grid/main.py", agent_name="engineer") as tracker:
+    with audit.track(
+        "read_file", "/city/services/power-grid/main.py", agent_name="engineer"
+    ) as tracker:
         tracker.result = "file contents"
     rows = audit.query(limit=1)
     assert len(rows) == 1

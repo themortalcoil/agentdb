@@ -10,15 +10,19 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from agentdb.dashboard.broadcast import Broadcaster
+from agentdb.db.audit import AuditLog
+from agentdb.db.filesystem import VirtualFS
 from agentdb.simulation.deps import ServiceGraph
+from agentdb.simulation.engine import SimulationEngine
 
 STATIC_DIR = Path(__file__).parent / "static"
 
 
-def build_fs_tree(fs) -> dict:
+def build_fs_tree(fs: VirtualFS) -> dict[str, int | dict]:
     """Build a nested dict tree from VirtualFS. Files=int(size), dirs=dict."""
-    def _walk(path: str) -> dict:
-        tree = {}
+
+    def _walk(path: str) -> dict[str, int | dict]:
+        tree: dict[str, int | dict] = {}
         for name in fs.list_dir(path):
             if name.startswith("__"):  # skip __overlay__ internal namespace
                 continue
@@ -31,10 +35,17 @@ def build_fs_tree(fs) -> dict:
                 if subtree:
                     tree[name] = subtree
         return tree
+
     return _walk("/")
 
 
-def create_app(broadcaster: Broadcaster, engine=None, fs=None, audit=None) -> FastAPI:
+def create_app(
+    broadcaster: Broadcaster,
+    engine: SimulationEngine | None = None,
+    fs: VirtualFS | None = None,
+    audit: AuditLog | None = None,
+    agent_names: list[str] | None = None,
+) -> FastAPI:
     app = FastAPI(title="AgentDB City Dashboard")
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -53,6 +64,23 @@ def create_app(broadcaster: Broadcaster, engine=None, fs=None, audit=None) -> Fa
                 tree = build_fs_tree(fs)
                 snapshot = json.dumps({"type": "fs_snapshot", "data": {"tree": tree}})
                 await ws.send_text(snapshot)
+
+            # Sync agent panel so new clients see agent status immediately
+            tick = engine.tick if engine else 0
+            for name in agent_names or []:
+                await ws.send_text(
+                    json.dumps(
+                        {
+                            "type": "agent_update",
+                            "data": {
+                                "agent": name,
+                                "status": "idle",
+                                "message": "",
+                                "tick": tick,
+                            },
+                        }
+                    )
+                )
 
             async def read_client():
                 try:

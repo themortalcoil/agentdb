@@ -1,7 +1,7 @@
 from agentdb.db.filesystem import VirtualFS
-from agentdb.simulation.evaluator import ServiceEvaluator, ServiceResult
+from agentdb.simulation.evaluator import ServiceEvaluator
 
-GOOD_SERVICE = '''
+GOOD_SERVICE = """
 def handle_load(load: float, config: dict) -> dict:
     capacity = config.get("capacity", 1.0)
     if load > capacity:
@@ -15,17 +15,17 @@ def handle_load(load: float, config: dict) -> dict:
         "capacity": capacity,
         "metrics": {"utilization": load / capacity},
     }
-'''
+"""
 
-BAD_SERVICE = '''
+BAD_SERVICE = """
 def handle_load(load: float, config: dict) -> dict:
     return 1 / 0  # ZeroDivisionError
-'''
+"""
 
-SYNTAX_ERROR_SERVICE = '''
+SYNTAX_ERROR_SERVICE = """
 def handle_load(load config):  # syntax error
     pass
-'''
+"""
 
 
 def test_evaluate_good_service(db):
@@ -50,43 +50,44 @@ def test_evaluate_degraded_service(db):
 def test_evaluate_crashing_service(db):
     fs = VirtualFS(db)
     fs.write_file("/city/services/power-grid/main.py", BAD_SERVICE)
-    fs.write_file("/city/services/power-grid/config.json", '{}')
+    fs.write_file("/city/services/power-grid/config.json", "{}")
     evaluator = ServiceEvaluator(fs)
     result = evaluator.evaluate("power-grid", load=0.5)
     assert result.status == "failed"
-    assert "ZeroDivisionError" in result.error
+    assert result.error and "ZeroDivisionError" in result.error
 
 
 def test_evaluate_syntax_error(db):
     fs = VirtualFS(db)
     fs.write_file("/city/services/power-grid/main.py", SYNTAX_ERROR_SERVICE)
-    fs.write_file("/city/services/power-grid/config.json", '{}')
+    fs.write_file("/city/services/power-grid/config.json", "{}")
     evaluator = ServiceEvaluator(fs)
     result = evaluator.evaluate("power-grid", load=0.5)
     assert result.status == "failed"
     assert result.error is not None
 
 
-INFINITE_LOOP_SERVICE = '''
+INFINITE_LOOP_SERVICE = """
 def handle_load(load: float, config: dict) -> dict:
     while True:
         pass
-'''
+"""
 
 
 def test_evaluate_infinite_loop_times_out(db):
     fs = VirtualFS(db)
     fs.write_file("/city/services/power-grid/main.py", INFINITE_LOOP_SERVICE)
-    fs.write_file("/city/services/power-grid/config.json", '{}')
+    fs.write_file("/city/services/power-grid/config.json", "{}")
     evaluator = ServiceEvaluator(fs)
     # Use a shorter timeout for testing
     import agentdb.simulation.evaluator as ev
+
     old_timeout = ev.EVAL_TIMEOUT
-    ev.EVAL_TIMEOUT = 2
+    ev.EVAL_TIMEOUT = 2  # ty: ignore[invalid-assignment]
     try:
         result = evaluator.evaluate("power-grid", load=0.5)
         assert result.status == "failed"
-        assert "timeout" in result.error.lower()
+        assert result.error and "timeout" in result.error.lower()
     finally:
         ev.EVAL_TIMEOUT = old_timeout
 
@@ -96,4 +97,4 @@ def test_evaluate_missing_service(db):
     evaluator = ServiceEvaluator(fs)
     result = evaluator.evaluate("nonexistent", load=0.5)
     assert result.status == "failed"
-    assert "not found" in result.error.lower()
+    assert result.error and "not found" in result.error.lower()

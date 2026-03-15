@@ -6,6 +6,9 @@ Multi-agent city simulation: SQLite-backed AgentFS + KV store, simulation engine
 
 - **Run:** `uv run python main.py` (dashboard http://0.0.0.0:8000)
 - **Tests:** `uv run pytest tests/ -v`
+- **Lint:** `just lint` (ruff check)
+- **Format:** `just format`; `just fmt` = format then lint
+- **Types:** `just typecheck` (ty)
 - **Config:** `AGENTDB_DB`, `TICK_INTERVAL`, `AGENTDB_HOST`, `AGENTDB_PORT`
 
 ## Architecture (where to change what)

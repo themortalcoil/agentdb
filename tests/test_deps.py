@@ -3,9 +3,7 @@ from agentdb.simulation.deps import ServiceGraph
 
 def test_default_city_services():
     g = ServiceGraph.default_city()
-    assert set(g.services) == {
-        "power-grid", "water-system", "traffic-control", "comms-network"
-    }
+    assert set(g.services) == {"power-grid", "water-system", "traffic-control", "comms-network"}
 
 
 def test_dependents():

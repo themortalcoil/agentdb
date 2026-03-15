@@ -13,9 +13,7 @@ class KVStore:
 
     def get(self, key: str, default: str | None = None) -> str | None:
         with self._lock:
-            row = self._conn.execute(
-                "SELECT value FROM kv_store WHERE key = ?", (key,)
-            ).fetchone()
+            row = self._conn.execute("SELECT value FROM kv_store WHERE key = ?", (key,)).fetchone()
             return row["value"] if row else default
 
     def set(self, key: str, value: str) -> None:

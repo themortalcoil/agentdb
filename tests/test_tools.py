@@ -36,13 +36,8 @@ def test_write_and_read_file(city_tools):
 
 
 def test_deploy_staging(city_tools):
-    city_tools.deploy_staging(
-        "/city/services/power-grid/main.py", "staged code"
-    )
-    assert (
-        city_tools.overlay.read_file("/city/services/power-grid/main.py")
-        == "staged code"
-    )
+    city_tools.deploy_staging("/city/services/power-grid/main.py", "staged code")
+    assert city_tools.overlay.read_file("/city/services/power-grid/main.py") == "staged code"
 
 
 def test_read_metrics(city_tools):

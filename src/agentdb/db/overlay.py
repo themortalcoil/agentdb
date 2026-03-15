@@ -30,9 +30,7 @@ class OverlayFS:
 
     def read_file(self, path: str) -> str | None:
         # Check whiteout first (file deleted in overlay)
-        row = self._conn.execute(
-            "SELECT path FROM fs_whiteout WHERE path = ?", (path,)
-        ).fetchone()
+        row = self._conn.execute("SELECT path FROM fs_whiteout WHERE path = ?", (path,)).fetchone()
         if row:
             return None
 
@@ -70,9 +68,7 @@ class OverlayFS:
         self._merge_recursive(f"/{OVERLAY_PREFIX}", "")
 
         # Apply whiteout deletions
-        whiteouts = self._conn.execute(
-            "SELECT path FROM fs_whiteout"
-        ).fetchall()
+        whiteouts = self._conn.execute("SELECT path FROM fs_whiteout").fetchall()
         for row in whiteouts:
             self._base.delete(row["path"])
 
@@ -110,9 +106,7 @@ class OverlayFS:
     def list_changes(self) -> list[OverlayChange]:
         changes: list[OverlayChange] = []
         self._collect_changes(f"/{OVERLAY_PREFIX}", "", changes)
-        whiteouts = self._conn.execute(
-            "SELECT path FROM fs_whiteout"
-        ).fetchall()
+        whiteouts = self._conn.execute("SELECT path FROM fs_whiteout").fetchall()
         for row in whiteouts:
             changes.append(OverlayChange(path=row["path"], change_type="deleted"))
         return changes
@@ -126,8 +120,6 @@ class OverlayFS:
             base_path = f"{base_dir}/{name}"
             content = self._base.read_file(overlay_path)
             if content is not None:
-                changes.append(
-                    OverlayChange(path=base_path, change_type="modified")
-                )
+                changes.append(OverlayChange(path=base_path, change_type="modified"))
             else:
                 self._collect_changes(overlay_path, base_path, changes)

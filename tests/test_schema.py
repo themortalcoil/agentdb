@@ -3,9 +3,7 @@ from agentdb.db.schema import init_db, EXPECTED_TABLES
 
 
 def test_init_db_creates_all_tables(db):
-    cursor = db.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-    )
+    cursor = db.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
     tables = {row["name"] for row in cursor.fetchall()}
     assert EXPECTED_TABLES.issubset(tables)
 
@@ -13,9 +11,7 @@ def test_init_db_creates_all_tables(db):
 def test_init_db_is_idempotent(db):
     """Calling init_db twice should not raise."""
     init_db(db)
-    cursor = db.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-    )
+    cursor = db.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
     tables = {row["name"] for row in cursor.fetchall()}
     assert EXPECTED_TABLES.issubset(tables)
 
@@ -30,7 +26,6 @@ def test_wal_mode_enabled(db):
 
 def test_wal_mode_set_on_file_db(tmp_path):
     """WAL mode is applied correctly on a real file-based database."""
-    import sqlite3
     from agentdb.db.schema import init_db
 
     db_path = str(tmp_path / "test.db")

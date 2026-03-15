@@ -2,7 +2,7 @@ from agentdb.db.kvstore import KVStore
 from agentdb.db.filesystem import VirtualFS
 from agentdb.simulation.engine import SimulationEngine
 
-POWER_GRID_CODE = '''
+POWER_GRID_CODE = """
 def handle_load(load: float, config: dict) -> dict:
     capacity = config.get("capacity", 1.0)
     status = "ok" if load <= capacity else "degraded"
@@ -11,16 +11,14 @@ def handle_load(load: float, config: dict) -> dict:
         "capacity": capacity,
         "metrics": {"utilization": load / capacity},
     }
-'''
+"""
 
 
 def _setup_city(db):
     """Seed the city with working services."""
     fs = VirtualFS(db)
     kv = KVStore(db)
-    services = [
-        "power-grid", "water-system", "traffic-control", "comms-network"
-    ]
+    services = ["power-grid", "water-system", "traffic-control", "comms-network"]
     for svc in services:
         fs.write_file(f"/city/services/{svc}/main.py", POWER_GRID_CODE)
         fs.write_file(f"/city/services/{svc}/config.json", '{"capacity": 1.0}')
@@ -83,9 +81,7 @@ async def test_broken_service_generates_failure_event(db):
     engine = SimulationEngine(db, fs, kv, seed=42)
     engine.on_event(lambda e: events_received.append(e))
     await engine.step()
-    failure_events = [
-        e for e in events_received if e.event_type.value == "service_failure"
-    ]
+    failure_events = [e for e in events_received if e.event_type.value == "service_failure"]
     assert len(failure_events) >= 1
     assert any(e.service == "power-grid" for e in failure_events)
 
@@ -102,9 +98,7 @@ async def test_cascade_event_has_source_field(db):
     engine = SimulationEngine(db, fs, kv, seed=42)
     engine.on_event(lambda e: events_received.append(e))
     await engine.step()
-    cascade_events = [
-        e for e in events_received if e.event_type.value == "cascade_failure"
-    ]
+    cascade_events = [e for e in events_received if e.event_type.value == "cascade_failure"]
     # power-grid has dependents, so at least one cascade should fire
     assert len(cascade_events) >= 1, "Expected at least one cascade event"
     for e in cascade_events:

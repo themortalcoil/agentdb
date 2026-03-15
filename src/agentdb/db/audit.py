@@ -12,6 +12,7 @@ from dataclasses import dataclass
 @dataclass
 class ToolCallTracker:
     """Mutable tracker used inside the track context manager."""
+
     result: str | None = None
     error: str | None = None
     row_id: int | None = None
@@ -57,8 +58,16 @@ class AuditLog:
                     """INSERT INTO tool_calls
                        (agent_name, name, parameters, result, error, started_at, completed_at, duration_ms)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (agent_name, name, parameters, tracker.result, tracker.error,
-                     started, completed, completed - started),
+                    (
+                        agent_name,
+                        name,
+                        parameters,
+                        tracker.result,
+                        tracker.error,
+                        started,
+                        completed,
+                        completed - started,
+                    ),
                 )
                 self._conn.commit()
             tracker.row_id = cursor.lastrowid
